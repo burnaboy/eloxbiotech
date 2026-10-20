@@ -16,19 +16,26 @@ export async function sendEmail(to: string, subject: string, body: string) {
 
 export async function deliverPendingEmails(limit = 100) {
   const rows = await prisma.emailOutbox.findMany({ where: { sentAt: null, error: null }, orderBy: { createdAt: "asc" }, take: limit });
-  for (const r of rows) await deliverOne(r.id);
-  return rows.length;
+  let sent = 0;
+  for (const r of rows) if (await deliverOne(r.id)) sent++;
+  return sent;
 }
 
-async function deliverOne(id: string) {
-  const row = await prisma.emailOutbox.findUniqueOrThrow({ where: { id } });
-  if (row.sentAt) return;
-  try {
-    await deliver(row.to, row.subject, row.body);
-    await prisma.emailOutbox.update({ where: { id }, data: { sentAt: new Date() } });
-  } catch (e) {
-    await prisma.emailOutbox.update({ where: { id }, data: { error: e instanceof Error ? e.message : String(e) } });
-  }
+/** Sends one queued email. A row lock means two overlapping job runs can't send the same email twice. */
+async function deliverOne(id: string): Promise<boolean> {
+  return prisma.$transaction(async (tx) => {
+    const [row] = await tx.$queryRaw<{ to: string; subject: string; body: string }[]>`
+      SELECT "to", "subject", "body" FROM "EmailOutbox" WHERE "id" = ${id} AND "sentAt" IS NULL AND "error" IS NULL FOR UPDATE SKIP LOCKED`;
+    if (!row) return false; // sent already, or another run is sending it
+    try {
+      await deliver(row.to, row.subject, row.body);
+      await tx.emailOutbox.update({ where: { id }, data: { sentAt: new Date() } });
+      return true;
+    } catch (e) {
+      await tx.emailOutbox.update({ where: { id }, data: { error: e instanceof Error ? e.message : String(e) } });
+      return false;
+    }
+  }, { timeout: 30_000 });
 }
 
 async function deliver(to: string, subject: string, _body: string) {

@@ -46,8 +46,8 @@ const cartInclude = {
 
 /** Sets a cart line. Pass the variant for products that have variants. Prices are never taken from the client. */
 export async function setCartQuantity(userId: string, productId: string, quantity: number, variantId: string | null = null) {
-  const qty = Math.floor(quantity);
-  if (!Number.isFinite(qty) || qty < 0 || qty > MAX_QTY) throw new AppError("Invalid quantity.");
+  if (!Number.isInteger(quantity) || quantity < 0 || quantity > MAX_QTY) throw new AppError("Invalid quantity.");
+  const qty = quantity;
   const variantKey = variantId ?? "";
   if (qty === 0) {
     await prisma.cartItem.deleteMany({ where: { userId, productId, variantKey } });

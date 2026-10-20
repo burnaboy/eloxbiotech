@@ -198,7 +198,10 @@ export async function imageAction(productId: string, imageId: string, op: "up" |
     const img = await prisma.productImage.findFirst({ where: { id: imageId, productId } });
     if (!img) throw new AppError("Image not found.");
     if (op === "remove") await removeProductImage(imageId, adminId);
-    else await moveProductImage(imageId, op === "up" ? -1 : 1);
+    else {
+      await moveProductImage(imageId, op === "up" ? -1 : 1);
+      await audit("product.imageMove", "Product", productId, adminId, { imageId, direction: op });
+    }
     return op === "remove" ? "Image removed" : "Order updated";
   });
 }
@@ -328,7 +331,8 @@ export async function resolveReturnAction(id: string, action: "APPROVE" | "REFUN
 // ---------- Members ----------
 
 export async function setUserStatusAction(userId: string, status: "ACTIVE" | "SUSPENDED", fd: FormData) {
-  await act(`/admin/users/${userId}`, { perm: "MEMBERS", risk: { fd, action: `user.${status.toLowerCase()}`, target: userId, confirm: status === "SUSPENDED" ? "SUSPEND" : undefined } }, async (adminId, reason) => {
+  await act(`/admin/users/${userId}`, { perm: "MEMBERS", risk: { fd, action: status === "SUSPENDED" ? "user.suspended" : "user.active", target: userId, confirm: status === "SUSPENDED" ? "SUSPEND" : undefined } }, async (adminId, reason) => {
+    z.enum(["ACTIVE", "SUSPENDED"]).parse(status);
     if (userId === adminId) throw new AppError("You can't change your own status.");
     const target = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
     if (target.role === "SUPER_ADMIN") throw new AppError("Super administrators can't be suspended here.");
@@ -350,7 +354,11 @@ export async function revokeSessionsAction(userId: string, fd: FormData) {
 // ---------- Commissions ----------
 
 export async function matureNowAction() {
-  await act(`/admin/commissions`, { perm: "COMMISSIONS" }, async () => `${await matureOrders()} order(s) approved`);
+  await act(`/admin/commissions`, { perm: "COMMISSIONS" }, async (adminId) => {
+    const n = await matureOrders();
+    await audit("commission.matureNow", "Commission", null, adminId, { orders: n, privileged: true });
+    return `${n} order(s) approved`;
+  });
 }
 
 export async function runBinaryAction(fd: FormData) {
