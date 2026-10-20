@@ -20,7 +20,8 @@ export function Badge({ className, tone, ...p }: React.HTMLAttributes<HTMLSpanEl
 
 const STATUS_TONE: Record<string, VariantProps<typeof badge>["tone"]> = {
   PENDING_PAYMENT: "warning", PAID: "primary", SHIPPED: "primary", DELIVERED: "success", CANCELLED: "neutral", REFUNDED: "danger",
-  REQUESTED: "warning", APPROVED: "primary", REJECTED: "danger", AVAILABLE: "success", REVERSED: "danger",
+  REQUESTED: "warning", APPROVED: "success", REJECTED: "danger", REVERSED: "danger", PENDING: "warning", HELD: "danger",
+  OPEN: "warning", ANSWERED: "primary", CLOSED: "neutral",
   ACTIVE: "success", SUSPENDED: "danger",
 };
 export function StatusBadge({ status }: { status: string }) {

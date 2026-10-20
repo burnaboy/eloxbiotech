@@ -2,6 +2,8 @@ import { timingSafeEqual } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import { expireStaleOrders, reconcilePendingPayments } from "@/lib/orders";
 import { matureOrders, runBinary } from "@/lib/commissions";
+import { deliverPendingEmails } from "@/lib/email";
+import { prisma } from "@/lib/db";
 
 /**
  * Scheduled jobs. Call with header "Authorization: Bearer $CRON_SECRET".
@@ -9,6 +11,8 @@ import { matureOrders, runBinary } from "@/lib/commissions";
  * - reconcile-payments: every 10 min
  * - mature-orders: hourly
  * - binary: daily just after midnight Lagos time (pays the previous day)
+ * - send-emails: every minute
+ * - cleanup: daily (expired sessions, old sign-in attempts)
  */
 function authorized(req: NextRequest) {
   const secret = process.env.CRON_SECRET;
@@ -32,6 +36,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ job
         return NextResponse.json({ expired: await expireStaleOrders() });
       case "reconcile-payments":
         return NextResponse.json(await reconcilePendingPayments());
+      case "send-emails":
+        return NextResponse.json({ processed: await deliverPendingEmails() });
+      case "cleanup": {
+        const now = new Date();
+        const [s, a] = await Promise.all([
+          prisma.session.deleteMany({ where: { expiresAt: { lt: now } } }),
+          prisma.loginAttempt.deleteMany({ where: { createdAt: { lt: new Date(Date.now() - 30 * 864e5) } } }),
+        ]);
+        return NextResponse.json({ sessions: s.count, loginAttempts: a.count });
+      }
       case "mature-orders":
         return NextResponse.json({ matured: await matureOrders() });
       case "binary": {

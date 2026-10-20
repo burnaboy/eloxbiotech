@@ -11,6 +11,34 @@ enum Role {
   CUSTOMER
   AFFILIATE
   ADMIN
+  SUPER_ADMIN
+}
+
+/// Areas an ADMIN can be granted. SUPER_ADMIN has all of them.
+enum AdminPermission {
+  ORDERS
+  PRODUCTS
+  MEMBERS
+  NETWORK
+  COMMISSIONS
+  PAYOUTS
+  SUPPORT
+  RISK
+  SETTINGS
+  AUDIT
+}
+
+enum ReturnStatus {
+  REQUESTED
+  APPROVED
+  REJECTED
+  REFUNDED
+}
+
+enum TicketStatus {
+  OPEN
+  ANSWERED
+  CLOSED
 }
 
 enum UserStatus {
@@ -54,8 +82,15 @@ enum CommissionType {
 }
 
 enum CommissionStatus {
-  AVAILABLE
+  /// Earned on a paid order, waiting for the refund window to close.
+  PENDING
+  /// Frozen by a dispute or by an administrator.
+  HELD
+  /// Counts toward the withdrawable balance.
+  APPROVED
   REVERSED
+  /// Fully covered by a completed payout.
+  PAID
 }
 
 enum PayoutStatus {
@@ -67,13 +102,26 @@ enum PayoutStatus {
 
 model User {
   id            String     @id @default(cuid())
+  /// Always stored lower-cased and trimmed (enforced by a CHECK constraint).
   email         String     @unique
+  emailVerifiedAt DateTime?
   passwordHash  String
+  emailOrderUpdates      Boolean @default(true)
+  emailCommissionUpdates Boolean @default(true)
+  emailMarketing         Boolean @default(false)
   name          String
   phone         String?
   role          Role       @default(CUSTOMER)
   status        UserStatus @default(ACTIVE)
   referralCode  String     @unique
+  signupIp      String?
+  adminPermissions AdminPermission[]
+  /// TOTP secret, encrypted with APP_ENCRYPTION_KEY.
+  mfaSecretEnc  String?
+  mfaEnabledAt  DateTime?
+  /// Last accepted TOTP time step, to stop a code being reused.
+  mfaLastStep   Int?
+  mfaRecoveryHashes String[]
   sponsorId     String?
   sponsor       User?      @relation("Sponsorship", fields: [sponsorId], references: [id])
   referrals     User[]     @relation("Sponsorship")
@@ -86,6 +134,10 @@ model User {
   orders      Order[]
   commissions Commission[]
   payouts     Payout[]
+  addresses   Address[]
+  notifications Notification[]
+  tickets     SupportTicket[]
+  returns     ReturnRequest[]
 
   @@index([sponsorId])
 }
@@ -96,6 +148,10 @@ model Session {
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   expiresAt DateTime
+  /// True until the second factor is entered for an MFA-enabled account.
+  mfaPending    Boolean   @default(false)
+  lastSeenAt    DateTime  @default(now())
+  mfaVerifiedAt DateTime?
   createdAt DateTime @default(now())
   ip        String?
   userAgent String?
@@ -159,8 +215,22 @@ model VolumeEntry {
   @@index([orderId])
 }
 
+model Category {
+  id          String    @id @default(cuid())
+  name        String
+  slug        String    @unique
+  description String?
+  sortOrder   Int       @default(0)
+  active      Boolean   @default(true)
+  products    Product[]
+}
+
 model Product {
   id                String   @id @default(cuid())
+  categoryId        String?
+  category          Category? @relation(fields: [categoryId], references: [id])
+  /// Extra gallery images; imageUrl is the main one.
+  images            String[]
   sku               String   @unique
   slug              String   @unique
   name              String
@@ -172,6 +242,7 @@ model Product {
   weightGrams       Int      @default(0)
   imageUrl          String?
   active            Boolean  @default(true)
+  featured          Boolean  @default(false)
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
@@ -230,7 +301,10 @@ model Order {
   shipState   String
   shipCountry String
   shipPostal  String?
+  carrier     String?
   trackingRef String?
+  shippedAt   DateTime?
+  deliveredAt DateTime?
 
   paidAt          DateTime?
   /// Set while a chargeback is open; such orders don't earn commissions until it's resolved.
@@ -245,8 +319,10 @@ model Order {
   payments    Payment[]
   volumes     VolumeEntry[]
   commissions Commission[]
+  returns     ReturnRequest[]
 
   @@index([userId])
+  @@index([referrerId])
   @@index([status, paidAt])
 }
 
@@ -295,8 +371,13 @@ model Commission {
   userId      String
   user        User             @relation(fields: [userId], references: [id])
   type        CommissionType
-  status      CommissionStatus @default(AVAILABLE)
+  status      CommissionStatus @default(PENDING)
   amountMinor Int
+  /// How much of this commission has been covered by completed payouts.
+  paidMinor   Int              @default(0)
+  releaseAt   DateTime?
+  approvedAt  DateTime?
+  holdReason  String?
   orderId     String?
   order       Order?           @relation(fields: [orderId], references: [id])
   runId       String?
@@ -308,6 +389,8 @@ model Commission {
 
   @@unique([userId, type, orderId])
   @@index([userId, createdAt])
+  @@index([orderId])
+  @@index([status])
 }
 
 /// One binary pairing run per period (e.g. per day). periodKey is unique so a run can never pay twice.
@@ -357,4 +440,138 @@ model AuditLog {
 
   @@index([entity, entityId])
   @@index([createdAt])
+}
+
+model Address {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  label     String
+  name      String
+  phone     String
+  line1     String
+  line2     String?
+  city      String
+  state     String
+  country   String
+  postal    String?
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  body      String
+  link      String?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, readAt])
+}
+
+model ReturnRequest {
+  id           String       @id @default(cuid())
+  orderId      String
+  order        Order        @relation(fields: [orderId], references: [id])
+  userId       String
+  user         User         @relation(fields: [userId], references: [id])
+  reason       String
+  status       ReturnStatus @default(REQUESTED)
+  adminNote    String?
+  resolvedById String?
+  resolvedAt   DateTime?
+  createdAt    DateTime     @default(now())
+
+  @@index([status])
+  @@index([orderId])
+}
+
+model SupportTicket {
+  id        String           @id @default(cuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id])
+  subject   String
+  orderId   String?
+  status    TicketStatus     @default(OPEN)
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+  messages  SupportMessage[]
+
+  @@index([status, updatedAt])
+  @@index([userId])
+}
+
+model SupportMessage {
+  id        String        @id @default(cuid())
+  ticketId  String
+  ticket    SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  authorId  String
+  isStaff   Boolean
+  body      String
+  createdAt DateTime      @default(now())
+
+  @@index([ticketId])
+}
+
+/// Only shown when the customer gave consent and an admin published it. Never seeded with made-up quotes.
+model Testimonial {
+  id               String   @id @default(cuid())
+  name             String
+  location         String?
+  quote            String
+  consentConfirmed Boolean  @default(false)
+  published        Boolean  @default(false)
+  createdAt        DateTime @default(now())
+}
+
+model ContactMessage {
+  id        String   @id @default(cuid())
+  name      String
+  email     String
+  phone     String?
+  subject   String
+  body      String
+  ip        String?
+  handled   Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([handled, createdAt])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+/// Every email the app sends. In development nothing leaves the server; admins can read them here.
+model EmailOutbox {
+  id        String    @id @default(cuid())
+  to        String
+  subject   String
+  body      String
+  sentAt    DateTime?
+  error     String?
+  createdAt DateTime  @default(now())
+}
+
+model EmailVerificationToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
 }

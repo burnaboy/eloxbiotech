@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getCurrentUser, requireUser } from "@/lib/session";
 import { addToCart, cancelPendingOrder, createOrderFromCart, setCartQuantity, startPayment, type Address } from "@/lib/orders";
-import { runAction, type ActionState } from "@/lib/action";
+import { runAction, str, type ActionState } from "@/lib/action";
+import { requestReturn } from "@/lib/returns";
 
 export async function addToCartAction(productId: string, quantity: number, returnTo: string): Promise<ActionState> {
   const user = await getCurrentUser();
@@ -50,4 +51,13 @@ export async function cancelOrderAction(orderId: string) {
   const res = await runAction(() => cancelPendingOrder(orderId, user.id, { userId: user.id }));
   revalidatePath(`/orders/${orderId}`);
   if (res?.error) redirect(`/orders/${orderId}?error=${encodeURIComponent(res.error)}`);
+}
+
+export async function requestReturnAction(orderId: string, fd: FormData) {
+  const user = await requireUser("/orders");
+  const res = await runAction(async () => {
+    await requestReturn(user.id, orderId, str(fd, "reason"));
+  });
+  revalidatePath(`/orders/${orderId}`);
+  redirect(`/orders/${orderId}?${res?.error ? `error=${encodeURIComponent(res.error)}` : "ok=Return%20request%20sent.%20We%27ll%20reply%20shortly."}`);
 }

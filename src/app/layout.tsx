@@ -22,14 +22,25 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         </a>
         <SiteHeader />
         <main id="main" className="min-h-[70vh]">{children}</main>
-        <footer className="mt-16 border-t py-8 text-sm text-muted-foreground">
-          <div className="container flex flex-col gap-2 sm:flex-row sm:justify-between">
-            <p>© {new Date().getFullYear()} {brand.companyName}. {brand.tagline}</p>
-            <nav className="flex gap-4" aria-label="Footer">
-              <a href="/compensation" className="hover:text-foreground">Compensation plan</a>
-              {brand.supportEmail && <a href={`mailto:${brand.supportEmail}`} className="hover:text-foreground">Support</a>}
-            </nav>
+        <footer className="mt-16 border-t bg-muted/30 py-10 text-sm">
+          <div className="container grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="space-y-2">
+              <p className="font-semibold">{brand.companyName}</p>
+              <p className="text-muted-foreground">{brand.tagline}</p>
+              {brand.registrationNumber && <p className="text-muted-foreground">Reg. no. {brand.registrationNumber}</p>}
+            </div>
+            {[
+              { h: "Shop", l: [["All products", "/products"], ["Search", "/search"], ["Cart", "/cart"], ["Orders", "/orders"]] },
+              { h: "Company", l: [["About us", "/about"], ["Contact", "/contact"], ["FAQ", "/faq"], ["Support", "/support"]] },
+              { h: "Affiliates & policies", l: [["Affiliate programme", "/affiliate-programme"], ["Compensation plan", "/compensation"], ["Earnings disclaimer", "/legal/earnings-disclaimer"], ["Terms", "/legal/terms"], ["Privacy", "/legal/privacy"], ["Shipping", "/legal/shipping"], ["Returns & refunds", "/legal/refunds"]] },
+            ].map((col) => (
+              <nav key={col.h} aria-label={col.h} className="space-y-2">
+                <p className="font-medium">{col.h}</p>
+                <ul className="space-y-1">{col.l.map(([t, h]) => <li key={h}><a href={h} className="text-muted-foreground hover:text-foreground">{t}</a></li>)}</ul>
+              </nav>
+            ))}
           </div>
+          <p className="container mt-8 text-xs text-muted-foreground">© {new Date().getFullYear()} {brand.companyName}. Payments processed securely by Paystack.</p>
         </footer>
       </body>
     </html>

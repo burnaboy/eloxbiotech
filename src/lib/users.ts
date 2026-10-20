@@ -29,8 +29,12 @@ async function findSponsor(code: string | undefined) {
   return sponsor;
 }
 
-export async function registerUser(raw: RegisterInput) {
+export async function registerUser(raw: RegisterInput, meta: { ip?: string } = {}) {
   const input = registerSchema.parse(raw);
+  if (meta.ip) {
+    const recent = await prisma.user.count({ where: { signupIp: meta.ip, createdAt: { gte: new Date(Date.now() - 3600e3) } } });
+    if (recent >= 5) throw new AppError("Too many sign-ups from this network. Please try again later.", 429);
+  }
   const sponsor = await findSponsor(input.referralCode || undefined);
   const passwordHash = await hashPassword(input.password);
 
@@ -45,6 +49,7 @@ export async function registerUser(raw: RegisterInput) {
             passwordHash,
             referralCode: randomCode(8),
             sponsorId: sponsor?.id ?? null,
+            signupIp: meta.ip ?? null,
             role: input.joinAsAffiliate ? "AFFILIATE" : "CUSTOMER",
           },
         });

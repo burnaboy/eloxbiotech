@@ -5,6 +5,8 @@ import { hashPassword } from "@/lib/auth";
 
 export async function resetDb() {
   const tables = [
+    "EmailVerificationToken", "PasswordResetToken", "EmailOutbox", "ContactMessage", "Testimonial", "SupportMessage", "SupportTicket",
+    "ReturnRequest", "Notification", "Address", "Category",
     "AuditLog", "Setting", "Payout", "Commission", "BinaryRun", "WebhookEvent", "Payment", "VolumeEntry",
     "OrderItem", "Order", "CartItem", "InventoryMovement", "Product", "AffiliateNode", "LoginAttempt", "Session", "User",
   ];
@@ -18,31 +20,36 @@ export async function setPlan(p: Partial<CompPlan>) {
 let n = 0;
 export async function makeRoot() {
   const user = await prisma.user.create({
-    data: { email: "root@test.dev", name: "Company", passwordHash: await hashPassword("x"), referralCode: "ROOT0001", role: "ADMIN" },
+    data: { email: "root@test.dev", name: "Company", passwordHash: await hashPassword("x"), referralCode: "ROOT0001", role: "SUPER_ADMIN", emailVerifiedAt: new Date() },
   });
   await prisma.affiliateNode.create({ data: { userId: user.id, ancestorIds: [] } });
   return user;
 }
 
+async function verified<T extends { id: string }>(p: Promise<T>) {
+  const u = await p;
+  return prisma.user.update({ where: { id: u.id }, data: { emailVerifiedAt: new Date() } });
+}
+
 export async function affiliate(sponsorCode: string | undefined, leg?: "LEFT" | "RIGHT", name = `a${++n}`) {
-  return registerUser({
+  return verified(registerUser({
     name,
     email: `${name}-${Date.now()}-${Math.random().toString(36).slice(2)}@test.dev`,
     password: "password123",
     referralCode: sponsorCode,
     leg,
     joinAsAffiliate: true,
-  });
+  }));
 }
 
 export async function customer(sponsorCode?: string) {
-  return registerUser({
+  return verified(registerUser({
     name: `c${++n}`,
     email: `c${n}-${Math.random().toString(36).slice(2)}@test.dev`,
     password: "password123",
     referralCode: sponsorCode,
     joinAsAffiliate: false,
-  });
+  }));
 }
 
 export async function product(over: Partial<{ priceMinor: number; pv: number; stock: number }> = {}) {

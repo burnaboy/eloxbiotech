@@ -3,11 +3,13 @@ import { z } from "zod";
 import type { OrderStatus, Prisma } from "@prisma/client";
 import { prisma, type Tx } from "./db";
 import { AppError } from "./errors";
-import { getBrand, getShopSettings } from "./settings";
+import { getBrand, getOps, getShopSettings } from "./settings";
 import { getProvider } from "./payments";
 import type { PaymentEvent } from "./payments/types";
 import { audit } from "./audit";
-import { reverseOrderCommissions } from "./commissions";
+import { holdOrderCommissions, onOrderPaid, releaseOrderCommissions, reverseOrderCommissions } from "./commissions";
+import { notify } from "./notify";
+import { requireVerified } from "./email-verification";
 
 export const MAX_QTY = 99;
 
@@ -72,11 +74,12 @@ function orderNumber() {
 /** Turns the cart into an order, reserving stock atomically. Fails without side effects if anything is short. */
 export async function createOrderFromCart(userId: string, rawAddress: Address) {
   const address = addressSchema.parse(rawAddress);
-  const shop = await getShopSettings();
-  const brand = await getBrand();
+  const [shop, brand, ops] = await Promise.all([getShopSettings(), getBrand(), getOps()]);
+  if (ops.checkoutPaused) throw new AppError("Checkout is temporarily paused. Please try again shortly.");
 
   const order = await prisma.$transaction(async (tx) => {
     const user = await tx.user.findUniqueOrThrow({ where: { id: userId }, include: { node: true, sponsor: { include: { node: true } } } });
+    requireVerified(user, "placing an order");
     const items = await tx.cartItem.findMany({ where: { userId }, include: { product: true } });
     if (!items.length) throw new AppError("Your cart is empty.");
 
@@ -187,6 +190,9 @@ export async function applyPaymentEvent(providerName: string, event: PaymentEven
           await audit("payment.needsReview", "Order", order.id, null, { providerRef: event.providerRef, orderStatus: order.status }, tx);
           return { status: "needs_review" as const };
         }
+        const paidOrder = await tx.order.findUniqueOrThrow({ where: { id: order.id } });
+        await onOrderPaid(tx, paidOrder);
+        await notify(order.userId, "Payment received", `We've received payment for order ${order.number}.`, `/orders/${order.id}`, tx, "order");
         await audit("order.paid", "Order", order.id, null, { providerRef: event.providerRef }, tx);
         return { status: "paid" as const, orderId: order.id };
       }
@@ -198,6 +204,7 @@ export async function applyPaymentEvent(providerName: string, event: PaymentEven
       }
       case "dispute.opened": {
         await tx.order.update({ where: { id: order.id }, data: { disputedAt: order.disputedAt ?? new Date() } });
+        await holdOrderCommissions(tx, order.id, "Payment dispute");
         await audit("order.disputeOpened", "Order", order.id, null, { providerRef: event.providerRef }, tx);
         return { status: "disputed" as const };
       }
@@ -207,6 +214,7 @@ export async function applyPaymentEvent(providerName: string, event: PaymentEven
           return { status: "charged_back" as const };
         }
         await tx.order.update({ where: { id: order.id }, data: { disputedAt: null } });
+        await releaseOrderCommissions(tx, order.id);
         await audit("order.disputeWon", "Order", order.id, null, undefined, tx);
         return { status: "dispute_won" as const };
       }
@@ -278,12 +286,21 @@ export async function expireStaleOrders(now = new Date()) {
 
 const FLOW: Partial<Record<OrderStatus, OrderStatus[]>> = { PAID: ["SHIPPED"], SHIPPED: ["DELIVERED"] };
 
-export async function updateFulfilment(orderId: string, to: "SHIPPED" | "DELIVERED", actorId: string, trackingRef?: string) {
+export async function updateFulfilment(orderId: string, to: "SHIPPED" | "DELIVERED", actorId: string, shipping: { carrier?: string; trackingRef?: string } = {}) {
   return prisma.$transaction(async (tx) => {
     const order = await tx.order.findUniqueOrThrow({ where: { id: orderId } });
     if (!FLOW[order.status]?.includes(to)) throw new AppError(`Can't move an order from ${order.status} to ${to}.`);
-    await tx.order.update({ where: { id: orderId }, data: { status: to, trackingRef: trackingRef || order.trackingRef } });
-    await audit(`order.${to.toLowerCase()}`, "Order", orderId, actorId, { trackingRef }, tx);
+    await tx.order.update({
+      where: { id: orderId },
+      data: {
+        status: to,
+        carrier: shipping.carrier || order.carrier,
+        trackingRef: shipping.trackingRef || order.trackingRef,
+        ...(to === "SHIPPED" ? { shippedAt: new Date() } : { deliveredAt: new Date() }),
+      },
+    });
+    await notify(order.userId, to === "SHIPPED" ? "Your order has shipped" : "Your order was delivered", `Order ${order.number} is ${to.toLowerCase()}.`, `/orders/${orderId}`, tx, "order");
+    await audit(`order.${to.toLowerCase()}`, "Order", orderId, actorId, shipping, tx);
   });
 }
 
@@ -298,6 +315,8 @@ export async function refundOrder(orderId: string, actorId: string, opts: { rest
   await prisma.$transaction((tx) => applyRefund(tx, orderId, actorId, opts));
 }
 
+export { applyRefund };
+
 /** Marks an order refunded, optionally restocks, and reverses commissions/volume if already credited. */
 async function applyRefund(tx: Tx, orderId: string, actorId: string | null, opts: { restock: boolean; reason?: string }) {
   const moved = await tx.order.updateMany({ where: { id: orderId, status: { in: PAID_STATES } }, data: { status: "REFUNDED" } });
@@ -305,6 +324,7 @@ async function applyRefund(tx: Tx, orderId: string, actorId: string | null, opts
   await tx.payment.updateMany({ where: { orderId, status: "SUCCEEDED" }, data: { status: "REFUNDED" } });
   if (opts.restock) await releaseStock(tx, orderId, "REFUND", actorId);
   const order = await tx.order.findUniqueOrThrow({ where: { id: orderId } });
-  if (order.commissionedAt) await reverseOrderCommissions(tx, order.id, actorId);
+  await reverseOrderCommissions(tx, order.id, actorId, opts.reason?.startsWith("Chargeback") ? "Chargeback" : "Refund");
+  await notify(order.userId, "Order refunded", `Order ${order.number} has been refunded.`, `/orders/${orderId}`, tx, "order");
   await audit("order.refund", "Order", orderId, actorId, { restock: opts.restock, reason: opts.reason ?? null }, tx);
 }

@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { LayoutDashboard, LogOut, Shield, ShoppingBag, ShoppingCart, User } from "lucide-react";
+import { Bell, CircleUser, LayoutDashboard, LogOut, Shield, ShoppingBag, ShoppingCart, User } from "lucide-react";
+import { getOps } from "@/lib/settings";
 import { getCurrentUser } from "@/lib/session";
 import { getBrand } from "@/lib/settings";
 import { prisma } from "@/lib/db";
@@ -9,7 +10,11 @@ import { logoutAction } from "@/app/(auth)/actions";
 export async function SiteHeader() {
   const [brand, user] = await Promise.all([getBrand(), getCurrentUser()]);
   const cartCount = user ? (await prisma.cartItem.aggregate({ where: { userId: user.id }, _sum: { quantity: true } }))._sum.quantity ?? 0 : 0;
+  const unread = user ? await prisma.notification.count({ where: { userId: user.id, readAt: null } }) : 0;
+  const ops = await getOps();
   return (
+    <>
+    {ops.notice && <div role="status" className="bg-accent px-4 py-2 text-center text-sm text-accent-foreground">{ops.notice}</div>}
     <header className="sticky top-0 z-40 border-b bg-background/90 backdrop-blur">
       <div className="container flex h-16 items-center gap-4">
         <Link href="/" className="flex items-center gap-2 font-semibold tracking-tight">
@@ -25,7 +30,7 @@ export async function SiteHeader() {
         </Link>
         <nav className="ml-auto flex items-center gap-1" aria-label="Main">
           <Button asChild variant="ghost" size="sm">
-            <Link href="/">Shop</Link>
+            <Link href="/products">Shop</Link>
           </Button>
           {user ? (
             <>
@@ -35,7 +40,7 @@ export async function SiteHeader() {
               <Button asChild variant="ghost" size="sm">
                 <Link href="/dashboard"><LayoutDashboard aria-hidden /> <span className="hidden sm:inline">Dashboard</span></Link>
               </Button>
-              {user.role === "ADMIN" && (
+              {(user.role === "ADMIN" || user.role === "SUPER_ADMIN") && (
                 <Button asChild variant="ghost" size="sm">
                   <Link href="/admin"><Shield aria-hidden /> <span className="hidden sm:inline">Admin</span></Link>
                 </Button>
@@ -44,6 +49,15 @@ export async function SiteHeader() {
                 <Link href="/cart" aria-label={`Cart, ${cartCount} items`}>
                   <ShoppingCart aria-hidden /> {cartCount}
                 </Link>
+              </Button>
+              <Button asChild variant="ghost" size="icon">
+                <Link href="/notifications" aria-label={`Notifications, ${unread} unread`} className="relative">
+                  <Bell aria-hidden />
+                  {unread > 0 && <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-destructive" />}
+                </Link>
+              </Button>
+              <Button asChild variant="ghost" size="icon">
+                <Link href="/account" aria-label="Account"><CircleUser aria-hidden /></Link>
               </Button>
               <form action={logoutAction}>
                 <Button variant="ghost" size="icon" aria-label="Sign out" title="Sign out">
@@ -64,5 +78,6 @@ export async function SiteHeader() {
         </nav>
       </div>
     </header>
+    </>
   );
 }

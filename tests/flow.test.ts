@@ -173,7 +173,8 @@ describe("commissions", () => {
     const order = await buyAndPay(c.id, p.id);
     await refundOrder(order.id, root.id, { restock: true });
     expect(await matureOrders(later(30))).toBe(0);
-    expect(await prisma.commission.count()).toBe(0);
+    expect(await prisma.commission.count({ where: { status: { not: "REVERSED" } } })).toBe(0);
+    expect(await prisma.commission.count({ where: { status: "REVERSED" } })).toBe(1);
     expect((await prisma.product.findUniqueOrThrow({ where: { id: p.id } })).stock).toBe(5);
   });
 

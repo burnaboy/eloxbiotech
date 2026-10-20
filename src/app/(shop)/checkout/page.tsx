@@ -11,13 +11,17 @@ export const metadata = { title: "Checkout" };
 
 export default async function CheckoutPage() {
   const user = await requireUser("/checkout");
-  const [cart, brand, last] = await Promise.all([
+  const [cart, brand, last, saved] = await Promise.all([
     getCart(user.id),
     getBrand(),
     prisma.order.findFirst({ where: { userId: user.id }, orderBy: { createdAt: "desc" } }),
+    prisma.address.findFirst({ where: { userId: user.id }, orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }] }),
   ]);
   if (!cart.items.length) redirect("/cart");
-  const defaults = last
+  if (!user.emailVerifiedAt) redirect("/account?error=Please%20confirm%20your%20email%20address%20before%20checking%20out.");
+  const defaults = saved
+    ? { shipName: saved.name, shipPhone: saved.phone, shipLine1: saved.line1, shipLine2: saved.line2 ?? "", shipCity: saved.city, shipState: saved.state, shipCountry: saved.country, shipPostal: saved.postal ?? "" }
+    : last
     ? { shipName: last.shipName, shipPhone: last.shipPhone, shipLine1: last.shipLine1, shipLine2: last.shipLine2 ?? "", shipCity: last.shipCity, shipState: last.shipState, shipCountry: last.shipCountry, shipPostal: last.shipPostal ?? "" }
     : { shipName: user.name, shipPhone: user.phone ?? "" };
   return (

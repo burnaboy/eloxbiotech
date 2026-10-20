@@ -10,6 +10,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
           { href: "/dashboard", label: "Overview" },
           { href: "/dashboard/tree", label: "Binary tree" },
           { href: "/dashboard/team", label: "My referrals" },
+          { href: "/dashboard/sales", label: "Attributed sales" },
           { href: "/dashboard/commissions", label: "Commissions" },
           { href: "/dashboard/payouts", label: "Payouts" },
         ];

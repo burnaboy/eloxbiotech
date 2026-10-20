@@ -1,20 +1,54 @@
-import type { AffiliateNode } from "@prisma/client";
+import type { AffiliateNode, Order } from "@prisma/client";
 import { prisma, type Tx } from "./db";
 import { AppError } from "./errors";
-import { getCompPlan, type CompPlan } from "./settings";
+import { getCompPlan, getOps, type CompPlan } from "./settings";
 import { applyVolume } from "./tree";
 import { computePairing } from "./binary";
 import { audit } from "./audit";
+import { notify } from "./notify";
 
-/**
- * Orders earn commissions only after the refund-hold window. This means refunds inside
- * the window never need a clawback. Run on a schedule (see /api/cron).
+/*
+ * Commission lifecycle
+ *   order paid          -> DIRECT commission PENDING (releaseAt = paid + holdDays)
+ *   dispute opened      -> PENDING becomes HELD
+ *   hold window passes  -> PENDING becomes APPROVED, order volume enters the binary tree
+ *   refund / chargeback -> PENDING/HELD/unpaid APPROVED become REVERSED; paid ones get a negative ADJUSTMENT
+ *   payout completed    -> APPROVED commissions are marked PAID oldest first
+ * Binary commissions are created APPROVED, because they only ever pair matured volume.
  */
+
+const PAID_STATES = ["PAID", "SHIPPED", "DELIVERED"] as const;
+
+/** Called in the same transaction that marks an order PAID. */
+export async function onOrderPaid(tx: Tx, order: Pick<Order, "id" | "number" | "referrerId" | "subtotalMinor" | "paidAt">) {
+  const plan = await getCompPlan(tx);
+  if (!order.referrerId || plan.directBonusPercent <= 0) return;
+  const referrer = await tx.user.findUnique({ where: { id: order.referrerId } });
+  if (!referrer || referrer.status !== "ACTIVE" || referrer.role === "CUSTOMER") return;
+  const amountMinor = Math.floor((order.subtotalMinor * plan.directBonusPercent) / 100);
+  if (amountMinor <= 0) return;
+  const paidAt = order.paidAt ?? new Date();
+  await tx.commission.create({
+    data: {
+      userId: referrer.id,
+      type: "DIRECT",
+      status: "PENDING",
+      amountMinor,
+      orderId: order.id,
+      releaseAt: new Date(paidAt.getTime() + plan.holdDays * 864e5),
+      details: { percent: plan.directBonusPercent, subtotalMinor: order.subtotalMinor },
+    },
+  });
+  await notify(referrer.id, "New pending commission", `A sale you referred (${order.number}) earned a pending commission. It's approved after the ${plan.holdDays}-day refund window.`, "/dashboard/commissions", tx, "commission");
+}
+
+/** Approves commissions and credits volume for orders whose refund window has passed. */
 export async function matureOrders(now = new Date()) {
-  const plan = await getCompPlan();
+  const [plan, ops] = await Promise.all([getCompPlan(), getOps()]);
+  if (ops.commissionsPaused) return 0;
   const cutoff = new Date(now.getTime() - plan.holdDays * 864e5);
   const due = await prisma.order.findMany({
-    where: { status: { in: ["PAID", "SHIPPED", "DELIVERED"] }, commissionedAt: null, disputedAt: null, paidAt: { lte: cutoff } },
+    where: { status: { in: [...PAID_STATES] }, commissionedAt: null, disputedAt: null, paidAt: { lte: cutoff } },
     select: { id: true },
     orderBy: { paidAt: "asc" },
   });
@@ -22,12 +56,16 @@ export async function matureOrders(now = new Date()) {
   for (const { id } of due) {
     const done = await prisma.$transaction(async (tx) => {
       const claimed = await tx.order.updateMany({
-        where: { id, commissionedAt: null, disputedAt: null, status: { in: ["PAID", "SHIPPED", "DELIVERED"] } },
+        where: { id, commissionedAt: null, disputedAt: null, status: { in: [...PAID_STATES] } },
         data: { commissionedAt: now },
       });
       if (claimed.count === 0) return false;
       const order = await tx.order.findUniqueOrThrow({ where: { id } });
-      await payDirectBonus(tx, order, plan);
+      const pending = await tx.commission.findMany({ where: { orderId: id, status: "PENDING" } });
+      for (const c of pending) {
+        await tx.commission.update({ where: { id: c.id }, data: { status: "APPROVED", approvedAt: now } });
+        await notify(c.userId, "Commission approved", `Your commission on order ${order.number} is now available to withdraw.`, "/dashboard/commissions", tx, "commission");
+      }
       if (order.volumeNodeId && order.totalPv > 0) await applyVolume(tx, order.volumeNodeId, order.id, order.totalPv);
       return true;
     });
@@ -36,38 +74,54 @@ export async function matureOrders(now = new Date()) {
   return matured;
 }
 
-async function payDirectBonus(
-  tx: Tx,
-  order: { id: string; referrerId: string | null; subtotalMinor: number },
-  plan: CompPlan,
-) {
-  if (!order.referrerId || plan.directBonusPercent <= 0) return;
-  const referrer = await tx.user.findUnique({ where: { id: order.referrerId } });
-  if (!referrer || referrer.status !== "ACTIVE" || referrer.role === "CUSTOMER") return;
-  const amountMinor = Math.floor((order.subtotalMinor * plan.directBonusPercent) / 100);
-  if (amountMinor <= 0) return;
-  await tx.commission.create({
-    data: {
-      userId: referrer.id,
-      type: "DIRECT",
-      amountMinor,
-      orderId: order.id,
-      details: { percent: plan.directBonusPercent, subtotalMinor: order.subtotalMinor },
-    },
+/** Reverses everything an order earned. Used for refunds and lost chargebacks. */
+export async function reverseOrderCommissions(tx: Tx, orderId: string, actorId: string | null, reason: string) {
+  const rows = await tx.commission.findMany({ where: { orderId, type: "DIRECT", status: { in: ["PENDING", "HELD", "APPROVED", "PAID"] } } });
+  for (const c of rows) {
+    if (c.status !== "PAID" && c.paidMinor === 0) {
+      await tx.commission.update({ where: { id: c.id }, data: { status: "REVERSED", holdReason: reason } });
+    } else {
+      // Already (partly) paid out: recover it from future earnings.
+      await tx.commission.create({
+        data: { userId: c.userId, type: "ADJUSTMENT", status: "APPROVED", approvedAt: new Date(), amountMinor: -c.amountMinor, orderId, note: `${reason} clawback`, details: { reverses: c.id } },
+      });
+    }
+    await notify(c.userId, "Commission reversed", `The commission on a referred order was reversed (${reason.toLowerCase()}).`, "/dashboard/commissions", tx, "commission");
+  }
+  const order = await tx.order.findUniqueOrThrow({ where: { id: orderId } });
+  if (order.commissionedAt && order.volumeNodeId && order.totalPv > 0) await applyVolume(tx, order.volumeNodeId, orderId, -order.totalPv);
+  await audit("commission.reverse", "Order", orderId, actorId, { count: rows.length, reason }, tx);
+}
+
+export async function holdOrderCommissions(tx: Tx, orderId: string, reason: string) {
+  await tx.commission.updateMany({ where: { orderId, status: "PENDING" }, data: { status: "HELD", holdReason: reason } });
+}
+
+export async function releaseOrderCommissions(tx: Tx, orderId: string) {
+  const order = await tx.order.findUniqueOrThrow({ where: { id: orderId } });
+  // Not yet matured -> back to pending; matureOrders approves it when the window passes.
+  await tx.commission.updateMany({
+    where: { orderId, status: "HELD" },
+    data: order.commissionedAt ? { status: "APPROVED", approvedAt: new Date(), holdReason: null } : { status: "PENDING", holdReason: null },
   });
 }
 
-/** Clawback for a refund after commissions were credited. Paid binary pairs are not unwound; carry volume is reduced. */
-export async function reverseOrderCommissions(tx: Tx, orderId: string, actorId: string | null) {
-  const direct = await tx.commission.findMany({ where: { orderId, type: "DIRECT", status: "AVAILABLE" } });
-  for (const c of direct) {
-    await tx.commission.create({
-      data: { userId: c.userId, type: "ADJUSTMENT", amountMinor: -c.amountMinor, orderId, note: "Refund clawback", details: { reverses: c.id } },
-    });
-  }
-  const order = await tx.order.findUniqueOrThrow({ where: { id: orderId } });
-  if (order.volumeNodeId && order.totalPv > 0) await applyVolume(tx, order.volumeNodeId, orderId, -order.totalPv);
-  await audit("commission.reverse", "Order", orderId, actorId, { directCount: direct.length }, tx);
+/** Admin hold / release on a single commission (e.g. suspicious activity). */
+export async function setCommissionHold(id: string, hold: boolean, actorId: string, reason?: string) {
+  return prisma.$transaction(async (tx) => {
+    const c = await tx.commission.findUniqueOrThrow({ where: { id }, include: { order: true } });
+    if (hold) {
+      if (!["PENDING", "APPROVED"].includes(c.status) || c.paidMinor > 0) throw new AppError("Only unpaid pending or approved commissions can be held.");
+      if (c.amountMinor < 0) throw new AppError("Deductions can't be held.");
+      await tx.commission.update({ where: { id }, data: { status: "HELD", holdReason: reason || "Held for review" } });
+    } else {
+      if (c.status !== "HELD") throw new AppError("This commission isn't held.");
+      if (c.order?.disputedAt) throw new AppError("The order has an open dispute.");
+      const approved = c.type !== "DIRECT" || !!c.order?.commissionedAt;
+      await tx.commission.update({ where: { id }, data: approved ? { status: "APPROVED", approvedAt: new Date(), holdReason: null } : { status: "PENDING", holdReason: null } });
+    }
+    await audit(hold ? "commission.hold" : "commission.release", "Commission", id, actorId, { reason: reason ?? null }, tx);
+  });
 }
 
 /** Qualification rules for earning binary. */
@@ -94,16 +148,15 @@ export async function isQualified(tx: Tx, node: AffiliateNode, plan: CompPlan) {
 
 /** Runs binary pairing for every node once per period. A period can never be paid twice. */
 export async function runBinary(periodKey: string, actorId: string | null) {
-  const plan = await getCompPlan();
+  const [plan, ops] = await Promise.all([getCompPlan(), getOps()]);
+  if (ops.commissionsPaused) throw new AppError("Commission processing is paused.");
   return prisma.$transaction(
     async (tx) => {
       const exists = await tx.binaryRun.findUnique({ where: { periodKey } });
       if (exists) throw new AppError(`Binary for ${periodKey} has already been run.`);
       const run = await tx.binaryRun.create({ data: { periodKey, actorId } });
 
-      const nodes = await tx.affiliateNode.findMany({
-        where: { OR: [{ leftCarryPv: { gt: 0 } }, { rightCarryPv: { gt: 0 } }] },
-      });
+      const nodes = await tx.affiliateNode.findMany({ where: { OR: [{ leftCarryPv: { gt: 0 } }, { rightCarryPv: { gt: 0 } }] } });
       let pairsPaid = 0;
       let amountMinor = 0;
       let flushedMinor = 0;
@@ -122,11 +175,14 @@ export async function runBinary(periodKey: string, actorId: string | null) {
               data: {
                 userId: node.userId,
                 type: "BINARY",
+                status: "APPROVED",
+                approvedAt: new Date(),
                 amountMinor: r.paidMinor,
                 runId: run.id,
                 details: { ...r, periodKey, before: { left: node.leftCarryPv, right: node.rightCarryPv } },
               },
             });
+            await notify(node.userId, "Binary commission", `You matched ${r.pairs} pair(s) for ${periodKey}.`, "/dashboard/commissions", tx, "commission");
           }
         }
       }

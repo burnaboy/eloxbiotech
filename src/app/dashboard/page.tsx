@@ -41,6 +41,10 @@ export default async function Dashboard() {
     prisma.commission.findMany({ where: { userId: user.id }, orderBy: { createdAt: "desc" }, take: 5 }),
   ]);
   const qualified = await isQualified(prisma, node, plan);
+  const [sponsor, parent] = await Promise.all([
+    user.sponsorId ? prisma.user.findUnique({ where: { id: user.sponsorId }, select: { name: true, referralCode: true } }) : null,
+    node.parentId ? prisma.affiliateNode.findUnique({ where: { id: node.parentId }, include: { user: { select: { name: true } } } }) : null,
+  ]);
   const m = (v: number) => formatMoney(v, brand.currency);
   const base = process.env.APP_URL ?? "";
   return (
@@ -55,6 +59,13 @@ export default async function Dashboard() {
         <Stat label="Right leg volume" value={`${node.rightCarryPv.toLocaleString()} PV`} hint={`${node.rightTotalPv.toLocaleString()} PV all time · ${node.rightCount} members`} />
         <Stat label="Personal volume" value={`${node.personalPv.toLocaleString()} PV`} hint="From your own and your customers' purchases" />
       </div>
+      <Card className="flex flex-wrap gap-x-8 gap-y-2 p-5 text-sm">
+        <p><span className="text-muted-foreground">Sponsor:</span> {sponsor ? `${sponsor.name} (${sponsor.referralCode})` : "Company"}</p>
+        <p><span className="text-muted-foreground">Placed under:</span> {parent ? parent.user.name : "Top of network"}</p>
+        <p><span className="text-muted-foreground">Side:</span> {node.position?.toLowerCase() ?? "—"}</p>
+        <p><span className="text-muted-foreground">Level:</span> {node.depth}</p>
+        <p><span className="text-muted-foreground">Pending commissions:</span> {m(wallet.pendingMinor)}</p>
+      </Card>
       {!qualified && (
         <Card className="p-5 text-sm">
           To earn binary commissions you need

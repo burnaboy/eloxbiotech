@@ -50,6 +50,8 @@ export const shopSettingsSchema = z.object({
   freeShippingOverMinor: z.number().int().min(0),
   minPayoutMinor: z.number().int().min(0),
   orderExpiryMinutes: z.number().int().min(5),
+  returnWindowDays: z.number().int().min(0).max(90),
+  deliveryInfo: z.string().trim().max(500),
 });
 export type ShopSettings = z.infer<typeof shopSettingsSchema>;
 export const DEFAULT_SHOP: ShopSettings = {
@@ -57,7 +59,24 @@ export const DEFAULT_SHOP: ShopSettings = {
   freeShippingOverMinor: 5000000,
   minPayoutMinor: 500000,
   orderExpiryMinutes: 60,
+  returnWindowDays: 7,
+  deliveryInfo: "Delivery in 2–5 working days within Lagos and 3–7 working days elsewhere in Nigeria.",
 };
+
+/** Emergency switches, only changeable by a super administrator. */
+export const opsSchema = z.object({
+  checkoutPaused: z.boolean(),
+  payoutsPaused: z.boolean(),
+  commissionsPaused: z.boolean(),
+  notice: z.string().trim().max(300),
+});
+export type Ops = z.infer<typeof opsSchema>;
+export const DEFAULT_OPS: Ops = { checkoutPaused: false, payoutsPaused: false, commissionsPaused: false, notice: "" };
+
+export async function getOps(tx: Tx = prisma): Promise<Ops> {
+  const row = await tx.setting.findUnique({ where: { key: "ops" } });
+  return opsSchema.parse({ ...DEFAULT_OPS, ...((row?.value as object) ?? {}) });
+}
 
 export const brandSchema = z.object({
   companyName: z.string().trim().min(1).max(80),
@@ -68,6 +87,9 @@ export const brandSchema = z.object({
   currency: z.enum(["NGN", "GHS", "ZAR", "KES", "USD"]),
   supportEmail: z.string().trim().email().or(z.literal("")),
   supportPhone: z.string().trim().max(30),
+  address: z.string().trim().max(300),
+  registrationNumber: z.string().trim().max(60),
+  about: z.string().trim().max(3000),
 });
 export type Brand = z.infer<typeof brandSchema>;
 export const DEFAULT_BRAND: Brand = {
@@ -79,6 +101,9 @@ export const DEFAULT_BRAND: Brand = {
   currency: "NGN",
   supportEmail: "",
   supportPhone: "",
+  address: "",
+  registrationNumber: "",
+  about: "",
 };
 
 export async function getBrand(tx: Tx = prisma): Promise<Brand> {
@@ -96,6 +121,6 @@ export async function getShopSettings(tx: Tx = prisma): Promise<ShopSettings> {
   return shopSettingsSchema.parse({ ...DEFAULT_SHOP, ...((row?.value as object) ?? {}) });
 }
 
-export async function saveSetting(key: "compPlan" | "shop" | "brand", value: CompPlan | ShopSettings | Brand, tx: Tx = prisma) {
+export async function saveSetting(key: "compPlan" | "shop" | "brand" | "ops", value: CompPlan | ShopSettings | Brand | Ops, tx: Tx = prisma) {
   await tx.setting.upsert({ where: { key }, create: { key, value }, update: { value } });
 }
