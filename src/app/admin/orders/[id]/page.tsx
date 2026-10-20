@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Badge, StatusBadge } from "@/components/ui/badge";
 import { Alert } from "@/components/ui/alert";
 import { Flash } from "@/components/flash";
-import { cancelOrderAdminAction, deliverOrderAction, refundOrderAction, shipOrderAction } from "../../actions";
+import { cancelOrderAdminAction, deliverOrderAction, receiveReturnAction, refundOrderAction, shipOrderAction } from "../../actions";
 
 export default async function AdminOrder({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ ok?: string; error?: string }> }) {
   await requireAdmin("ORDERS");
@@ -64,7 +64,7 @@ export default async function AdminOrder({ params, searchParams }: { params: Pro
               <form action={refundOrderAction.bind(null, order.id)} className="space-y-3 text-sm">
                 <Alert>Refunds {m(order.totalMinor)} through {order.payments.find((p) => p.status === "SUCCEEDED")?.provider ?? "the gateway"} and reverses related commissions. Needs a fresh authenticator code.</Alert>
                 <Input name="reason" placeholder="Reason" aria-label="Reason" required />
-                <label className="flex items-center gap-2"><input type="checkbox" name="restock" className="h-4 w-4" /> Return items to stock</label>
+                <p className="text-muted-foreground">{order.shippedAt ? "This order has shipped, so nothing goes back to stock now. Record returned goods below once they arrive and are inspected." : "This order hasn't shipped, so its items go straight back to stock."}</p>
                 <Input name="confirm" placeholder='Type REFUND to confirm' aria-label="Confirmation" />
                 <Button variant="destructive">Refund order</Button>
               </form>
@@ -72,6 +72,34 @@ export default async function AdminOrder({ params, searchParams }: { params: Pro
           </CardContent>
         </Card>
       </div>
+      {order.status === "REFUNDED" && order.shippedAt && order.items.some((i) => i.quantity > i.restockedQty + i.writtenOffQty) && (
+        <Card>
+          <CardHeader><CardTitle>Returned goods</CardTitle></CardHeader>
+          <CardContent>
+            <form action={receiveReturnAction.bind(null, order.id)} className="space-y-3 text-sm">
+              <p className="text-muted-foreground">When returned items arrive, restock the ones fit to resell and write off the rest. Each unit can only be recorded once.</p>
+              <table className="w-full">
+                <thead className="text-left text-xs text-muted-foreground"><tr><th className="py-1">Item</th><th>Still to record</th><th>Restock</th><th>Write off</th></tr></thead>
+                <tbody>
+                  {order.items.map((i) => {
+                    const open = i.quantity - i.restockedQty - i.writtenOffQty;
+                    return (
+                      <tr key={i.id}>
+                        <td className="py-1">{i.name}{i.variantName ? ` (${i.variantName})` : ""}</td>
+                        <td className="tabular-nums">{open}</td>
+                        <td><Input name={`restock_${i.id}`} inputMode="numeric" className="w-20" aria-label={`Restock ${i.name}`} disabled={open === 0} defaultValue="" /></td>
+                        <td><Input name={`writeoff_${i.id}`} inputMode="numeric" className="w-20" aria-label={`Write off ${i.name}`} disabled={open === 0} defaultValue="" /></td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              <Input name="note" placeholder="Inspection note (optional)" aria-label="Inspection note" />
+              <Button>Record returned goods</Button>
+            </form>
+          </CardContent>
+        </Card>
+      )}
       <Card>
         <CardHeader><CardTitle>Payments</CardTitle></CardHeader>
         <CardContent className="space-y-2 text-sm">

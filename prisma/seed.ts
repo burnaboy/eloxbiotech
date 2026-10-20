@@ -56,11 +56,32 @@ async function main() {
     if (exists) continue;
     const created = await prisma.product.create({
       data: {
-        sku: p.sku, slug, name: p.name, priceMinor: p.price * 100, pv: p.pv, stock: p.stock, featured: !!p.featured,
+        sku: p.sku, slug, name: p.name, priceMinor: p.price * 100, listPriceMinor: p.price * 100, pv: p.pv, stock: p.stock, featured: !!p.featured,
+        status: "ACTIVE", weightGrams: 500,
         categoryId: cats.get(p.cat), description: `${p.name}.\n\nSample product for setting up the shop. Replace the name, description, price, PV and photos with your real catalogue before launch.`,
       },
     });
-    await prisma.inventoryMovement.create({ data: { productId: created.id, delta: p.stock, reason: "RESTOCK", note: "Seed stock" } });
+    await prisma.inventoryMovement.create({ data: { productId: created.id, delta: p.stock, balance: p.stock, reason: "RESTOCK", note: "Seed stock" } });
+  }
+  // One sample product with options, to show how sizes work.
+  if (!(await prisma.product.findUnique({ where: { sku: "SAMPLE-009" } }))) {
+    const withOptions = await prisma.product.create({
+      data: {
+        sku: "SAMPLE-009", slug: "sample-product-with-sizes", name: "Sample product with sizes", priceMinor: 600000, listPriceMinor: 600000, pv: 30,
+        status: "ACTIVE", weightGrams: 300, categoryId: cats.get("personal-care"),
+        description: "Sample product with two sizes. Replace it with a real product before launch, or archive it.",
+        variants: {
+          create: [
+            { sku: "SAMPLE-009-S", name: "250 g", options: { Size: "250 g" }, stock: 20, sortOrder: 0 },
+            { sku: "SAMPLE-009-L", name: "500 g", options: { Size: "500 g" }, priceMinor: 1000000, pv: 50, weightGrams: 550, stock: 10, sortOrder: 1 },
+          ],
+        },
+      },
+      include: { variants: true },
+    });
+    for (const v of withOptions.variants) {
+      await prisma.inventoryMovement.create({ data: { productId: withOptions.id, variantId: v.id, delta: v.stock, balance: v.stock, reason: "RESTOCK", note: "Seed stock" } });
+    }
   }
 
   if (process.env.SEED_DEMO === "1") {

@@ -3,7 +3,7 @@ import { BadgeCheck, CreditCard, PackageCheck, RotateCcw, Share2, Truck, Users, 
 import { prisma } from "@/lib/db";
 import { getBrand, getShopSettings } from "@/lib/settings";
 import { formatMoney } from "@/lib/money";
-import { ProductCard } from "@/components/product-card";
+import { ProductCard, cardInclude } from "@/components/product-card";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 
@@ -11,8 +11,8 @@ export default async function Home() {
   const [brand, shop, categories, featured, testimonials] = await Promise.all([
     getBrand(),
     getShopSettings(),
-    prisma.category.findMany({ where: { active: true }, orderBy: [{ sortOrder: "asc" }, { name: "asc" }], include: { _count: { select: { products: { where: { active: true } } } } } }),
-    prisma.product.findMany({ where: { active: true }, orderBy: [{ featured: "desc" }, { createdAt: "desc" }], take: 8 }),
+    prisma.category.findMany({ where: { active: true, parentId: null }, orderBy: [{ sortOrder: "asc" }, { name: "asc" }], include: { _count: { select: { products: { where: { status: "ACTIVE" } } } } } }),
+    prisma.product.findMany({ where: { status: "ACTIVE" }, include: cardInclude, orderBy: [{ featured: "desc" }, { createdAt: "desc" }], take: 8 }),
     // Only quotes a customer agreed to share and an admin published.
     prisma.testimonial.findMany({ where: { published: true, consentConfirmed: true }, orderBy: { createdAt: "desc" }, take: 3 }),
   ]);

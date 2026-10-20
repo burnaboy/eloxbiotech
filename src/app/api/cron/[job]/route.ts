@@ -5,6 +5,7 @@ import { matureOrders, runBinary } from "@/lib/commissions";
 import { deliverPendingEmails } from "@/lib/email";
 import { prisma } from "@/lib/db";
 import { reconcileVolume } from "@/lib/volume";
+import { refreshSalePrices } from "@/lib/catalog";
 
 /**
  * Scheduled jobs. Call with header "Authorization: Bearer $CRON_SECRET".
@@ -14,6 +15,7 @@ import { reconcileVolume } from "@/lib/volume";
  * - binary: daily just after midnight Lagos time (pays the previous day)
  * - send-emails: every minute
  * - reconcile-volume: daily (checks network totals against the sales ledger, reports only)
+ * - refresh-prices: hourly (sale prices that started or ended, for sorting and filtering)
  * - cleanup: daily (expired sessions, old sign-in attempts)
  */
 function authorized(req: NextRequest) {
@@ -53,6 +55,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ job
         if (r.issueCount > 0) console.error(`volume reconciliation found ${r.issueCount} issue(s)`);
         return NextResponse.json({ nodes: r.nodes, orders: r.orders, issues: r.issueCount });
       }
+      case "refresh-prices":
+        return NextResponse.json({ changed: await refreshSalePrices(prisma) });
       case "mature-orders":
         return NextResponse.json({ matured: await matureOrders() });
       case "binary": {

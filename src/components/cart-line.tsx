@@ -5,20 +5,20 @@ import { Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { setQuantityAction } from "@/app/(shop)/actions";
 
-export function CartQuantity({ productId, quantity, max }: { productId: string; quantity: number; max: number }) {
+export function CartQuantity({ productId, variantId, quantity, max }: { productId: string; variantId: string | null; quantity: number; max: number }) {
   const [pending, start] = useTransition();
-  const set = (q: number) => start(async () => { await setQuantityAction(productId, q); });
+  const set = (q: number) => start(async () => { await setQuantityAction(productId, q, variantId); });
   return (
     <div className="flex items-center gap-2">
-      <label className="sr-only" htmlFor={`qty-${productId}`}>Quantity</label>
+      <label className="sr-only" htmlFor={`qty-${productId}-${variantId ?? ""}`}>Quantity</label>
       <select
-        id={`qty-${productId}`}
+        id={`qty-${productId}-${variantId ?? ""}`}
         className="h-9 rounded-md border bg-card px-2 text-sm"
         value={quantity}
         disabled={pending}
         onChange={(e) => set(Number(e.target.value))}
       >
-        {Array.from({ length: Math.max(quantity, Math.min(max, 20)) }, (_, i) => i + 1).map((n) => (
+        {Array.from({ length: Math.max(quantity, Math.min(max, 20), 1) }, (_, i) => i + 1).map((n) => (
           <option key={n} value={n}>{n}</option>
         ))}
       </select>

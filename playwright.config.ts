@@ -9,6 +9,9 @@ const env = {
   ALLOW_TEST_PAYMENTS: "true",
   TEST_PAYMENT_SECRET: "e2e-secret",
   CRON_SECRET: "e2e-cron",
+  STORAGE_DRIVER: "local",
+  ALLOW_LOCAL_STORAGE: "true",
+  UPLOAD_DIR: ".data/e2e-uploads",
   APP_ENCRYPTION_KEY: process.env.APP_ENCRYPTION_KEY ?? "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
 };
 Object.assign(process.env, env);

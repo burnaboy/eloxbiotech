@@ -18,6 +18,15 @@ test("guest can browse the shop and read the policies", async ({ page }) => {
   await expect(page.getByRole("heading", { name: /Shea Butter Body Lotion/ })).toBeVisible();
   await expect(page.getByText(/₦7,500\.00/)).toBeVisible();
 
+  // Sorting, price filter and options.
+  await page.goto("/products?sort=price-desc&min=10000");
+  await expect(page.getByText(/^\d+ products?/)).toBeVisible();
+  await expect(page.getByText("Moringa Green Tea")).toHaveCount(0); // cheaper than the minimum
+  await page.goto("/products/sample-product-with-sizes");
+  await expect(page.getByText("From")).toBeVisible();
+  await page.getByText("500 g").click();
+  await expect(page.getByText("₦10,000.00").last()).toBeVisible();
+
   for (const path of ["/about", "/contact", "/faq", "/affiliate-programme", "/compensation", "/legal/terms", "/legal/privacy", "/legal/shipping", "/legal/refunds", "/legal/earnings-disclaimer"]) {
     const res = await page.goto(path);
     expect(res?.status(), path).toBe(200);

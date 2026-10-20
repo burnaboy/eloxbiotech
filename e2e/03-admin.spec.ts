@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import sharp from "sharp";
 import { db, signIn, totpFor } from "./helpers";
 
 const ADMIN = "admin@binarycommerce.local";
@@ -60,6 +61,35 @@ test("super admin must set up two-step verification, then can ship an order and 
   expect(rec.method).toBe("ADMIN");
   expect(rec.position).toBe("RIGHT");
   await expect(page.getByRole("cell", { name: "Pending Demo" })).toBeVisible();
+
+  // Create a product, upload an image and publish it.
+  await page.goto("/admin/products/new");
+  await page.getByLabel("Name", { exact: true }).fill("E2E Test Soap");
+  await page.getByLabel("SKU", { exact: true }).click();
+  await expect(page.getByLabel("URL slug")).toHaveValue("e2e-test-soap");
+  await page.getByLabel("SKU", { exact: true }).fill("E2E-SOAP");
+  await page.getByLabel("Description", { exact: true }).fill("A product created by the browser test.");
+  await page.getByLabel("Regular price").fill("2500");
+  await page.getByLabel("Sale price").fill("2000");
+  await page.getByLabel("Opening stock").fill("12");
+  await page.getByLabel("Cost price").fill("900");
+  await page.getByLabel("Product facts").fill("Brand: Test\nWeight: 100 g");
+  await page.getByLabel("Publication status").selectOption("ACTIVE");
+  await page.getByRole("button", { name: "Save product" }).click();
+  await expect(page.getByText("Saved", { exact: true })).toBeVisible();
+  await expect(page.getByText(/Cost \/ margin/)).toBeVisible();
+  const png = await sharp({ create: { width: 400, height: 400, channels: 3, background: "#2a6" } }).png().toBuffer();
+  await page.getByLabel("Image file").setInputFiles({ name: "soap.png", mimeType: "image/png", buffer: png });
+  await page.getByLabel("Image description").fill("Green soap bar");
+  await page.getByRole("button", { name: "Upload" }).click();
+  await expect(page.getByText("Image uploaded")).toBeVisible();
+  await page.goto("/products/e2e-test-soap");
+  await expect(page.getByRole("img", { name: "Green soap bar" })).toBeVisible();
+  await expect(page.getByText("₦2,000.00")).toBeVisible();
+  await expect(page.getByText("Brand")).toBeVisible();
+  const imgUrl = await page.getByRole("img", { name: "Green soap bar" }).getAttribute("src");
+  const imgRes = await page.request.get(imgUrl!);
+  expect(imgRes.headers()["content-type"]).toBe("image/webp");
 
   // Every admin page renders.
   for (const p of ["orders", "returns", "products", "categories", "testimonials", "users", "network", "commissions", "payouts", "support", "risk", "settings", "audit", "team", "operations"]) {

@@ -21,12 +21,15 @@ export async function requestReturn(userId: string, orderId: string, reasonRaw: 
   return r;
 }
 
-/** APPROVE = expect the item back; REFUND = refund now (optionally restocking); REJECT = close. */
-export async function resolveReturn(id: string, action: "APPROVE" | "REFUND" | "REJECT", actorId: string, opts: { note?: string; restock?: boolean } = {}) {
+/**
+ * APPROVE = expect the item back; REFUND = refund now; REJECT = close.
+ * Stock follows the restocking policy in inventory.ts: returned goods are restocked from the order page once inspected.
+ */
+export async function resolveReturn(id: string, action: "APPROVE" | "REFUND" | "REJECT", actorId: string, opts: { note?: string } = {}) {
   const r = await prisma.returnRequest.findUniqueOrThrow({ where: { id }, include: { order: true } });
   const allowed = { APPROVE: ["REQUESTED"], REFUND: ["REQUESTED", "APPROVED"], REJECT: ["REQUESTED", "APPROVED"] }[action];
   if (!allowed.includes(r.status)) throw new AppError(`This return is already ${r.status.toLowerCase()}.`);
-  if (action === "REFUND") await refundOrder(r.orderId, actorId, { restock: !!opts.restock, reason: `Return: ${r.reason.slice(0, 200)}` });
+  if (action === "REFUND") await refundOrder(r.orderId, actorId, { reason: `Return: ${r.reason.slice(0, 200)}` });
   const status = action === "APPROVE" ? "APPROVED" : action === "REFUND" ? "REFUNDED" : "REJECTED";
   await prisma.returnRequest.update({ where: { id }, data: { status, adminNote: opts.note || r.adminNote, resolvedById: actorId, resolvedAt: new Date() } });
   await notify(r.userId, `Return ${status.toLowerCase()}`, `Your return for order ${r.order.number} is ${status.toLowerCase()}.${opts.note ? ` ${opts.note}` : ""}`, `/orders/${r.orderId}`, undefined, "order");

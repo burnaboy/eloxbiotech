@@ -4,12 +4,12 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { Prisma, type AdminPermission } from "@prisma/client";
 import { z } from "zod";
-import { hasRecentStepUp, requireAdmin, requireSuperAdmin } from "@/lib/session";
+import { canSeeCosts, hasRecentStepUp, requireAdmin, requireSuperAdmin } from "@/lib/session";
 import { prisma } from "@/lib/db";
 import { runAction, str, type ActionState } from "@/lib/action";
 import { AppError } from "@/lib/errors";
 import { audit } from "@/lib/audit";
-import { toMinor } from "@/lib/money";
+import { optionalMinor, signedMinor, toMinor } from "@/lib/money";
 import { cancelPendingOrder, refundOrder, updateFulfilment } from "@/lib/orders";
 import { matureOrders, runBinary, setCommissionHold } from "@/lib/commissions";
 import { processPayout } from "@/lib/wallet";
@@ -17,6 +17,10 @@ import { resolveReturn } from "@/lib/returns";
 import { closeTicket, replyTicket } from "@/lib/support";
 import { resetMfa } from "@/lib/mfa";
 import { notify } from "@/lib/notify";
+import { productFormSchema, variantFormSchema, cmToMm, lagosLocalToDate, type ProductFormValues } from "@/lib/product-input";
+import { parseAttributes, refreshListPrice } from "@/lib/catalog";
+import { adjustStock, receiveReturnedItems } from "@/lib/inventory";
+import { addProductImage, moveProductImage, removeProductImage } from "@/lib/images";
 import { placeInTree } from "@/lib/tree";
 import { reconcileVolume } from "@/lib/volume";
 import {
@@ -48,48 +52,45 @@ const num = (fd: FormData, k: string) => Number(str(fd, k));
 
 // ---------- Products, categories, testimonials ----------
 
-const productInput = z.object({
-  name: z.string().trim().min(2).max(120),
-  slug: z.string().trim().toLowerCase().regex(/^[a-z0-9-]+$/, "Use lowercase letters, numbers and dashes").max(120),
-  sku: z.string().trim().toUpperCase().min(2).max(40),
-  description: z.string().trim().min(10).max(5000),
-  price: z.coerce.number().positive().max(100_000_000),
-  pv: z.coerce.number().int().min(0).max(1_000_000),
-  lowStockThreshold: z.coerce.number().int().min(0).max(100_000),
-  weightGrams: z.coerce.number().int().min(0).max(1_000_000),
-  imageUrl: z.string().trim().url().or(z.literal("")),
-  images: z.string().max(4000),
-  categoryId: z.string().max(40),
-  active: z.boolean(),
-  featured: z.boolean(),
-  initialStock: z.coerce.number().int().min(0).max(1_000_000).optional(),
-});
-export type ProductInput = z.input<typeof productInput>;
-
-export async function saveProductAction(id: string | null, raw: ProductInput): Promise<ActionState> {
+/** Creates or updates a product. Cost price is only read or written for staff with PRODUCT_COSTS. */
+export async function saveProductAction(id: string | null, raw: ProductFormValues): Promise<ActionState> {
   const admin = await requireAdmin("PRODUCTS");
+  const costs = canSeeCosts(admin);
   let savedId = id;
   const res = await runAction(async () => {
-    const v = productInput.parse(raw);
-    const images = v.images.split(/\s+/).map((s) => s.trim()).filter(Boolean);
-    for (const u of images) z.string().url().parse(u);
+    const v = productFormSchema.parse(raw);
     const data = {
-      name: v.name, slug: v.slug, sku: v.sku, description: v.description, priceMinor: toMinor(v.price), pv: v.pv,
-      lowStockThreshold: v.lowStockThreshold, weightGrams: v.weightGrams, imageUrl: v.imageUrl || null, images: images.slice(0, 8),
-      categoryId: v.categoryId || null, active: v.active, featured: v.featured,
+      name: v.name, slug: v.slug, sku: v.sku, description: v.description, categoryId: v.categoryId || null,
+      status: v.status, featured: v.featured,
+      priceMinor: toMinor(v.price), salePriceMinor: optionalMinor(v.salePrice),
+      saleStartsAt: lagosLocalToDate(v.saleStartsAt), saleEndsAt: lagosLocalToDate(v.saleEndsAt),
+      pv: Number(v.pv), lowStockThreshold: Number(v.lowStockThreshold),
+      shippable: v.shippable, weightGrams: v.weightGrams ? Number(v.weightGrams) : 0,
+      lengthMm: cmToMm(v.lengthCm), widthMm: cmToMm(v.widthCm), heightMm: cmToMm(v.heightCm),
+      metaTitle: v.metaTitle || null, metaDescription: v.metaDescription || null,
+      attributes: parseAttributes(v.attributes),
+      ...(costs && v.costPrice !== undefined ? { costPriceMinor: optionalMinor(v.costPrice) } : {}),
     };
+    if (data.categoryId && !(await prisma.category.findUnique({ where: { id: data.categoryId } }))) throw new AppError("That category doesn't exist.");
     try {
-      if (id) {
-        const before = await prisma.product.findUniqueOrThrow({ where: { id } });
-        await prisma.product.update({ where: { id }, data });
-        await audit("product.update", "Product", id, admin.id, { priceBefore: before.priceMinor, pvBefore: before.pv, ...data });
-      } else {
-        const stock = v.initialStock ?? 0;
-        const p = await prisma.product.create({ data: { ...data, stock } });
-        if (stock > 0) await prisma.inventoryMovement.create({ data: { productId: p.id, delta: stock, reason: "RESTOCK", actorId: admin.id, note: "Initial stock" } });
-        await audit("product.create", "Product", p.id, admin.id, data);
-        savedId = p.id;
-      }
+      await prisma.$transaction(async (tx) => {
+        if (id) {
+          const before = await tx.product.findUniqueOrThrow({ where: { id }, omit: { costPriceMinor: !costs } });
+          await tx.product.update({ where: { id }, data });
+          await refreshListPrice(tx, id);
+          await audit("product.update", "Product", id, admin.id, { before: pick(before), after: pick(data) } as Prisma.InputJsonObject, tx);
+        } else {
+          const p = await tx.product.create({ data: { ...data, listPriceMinor: data.priceMinor } });
+          await refreshListPrice(tx, p.id);
+          const stock = v.initialStock ? Number(v.initialStock) : 0;
+          if (stock > 0) {
+            await tx.product.update({ where: { id: p.id }, data: { stock } });
+            await tx.inventoryMovement.create({ data: { productId: p.id, delta: stock, balance: stock, reason: "RESTOCK", actorId: admin.id, note: "Opening stock" } });
+          }
+          await audit("product.create", "Product", p.id, admin.id, pick(data) as Prisma.InputJsonObject, tx);
+          savedId = p.id;
+        }
+      });
     } catch (e) {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") throw new AppError("That SKU or URL slug is already used.");
       throw e;
@@ -100,26 +101,116 @@ export async function saveProductAction(id: string | null, raw: ProductInput): P
   redirect(`/admin/products/${savedId}?ok=Saved`);
 }
 
+/** Fields worth keeping in the audit trail for a product change. */
+function pick(p: Record<string, unknown>) {
+  const keys = ["name", "sku", "slug", "status", "priceMinor", "salePriceMinor", "saleStartsAt", "saleEndsAt", "costPriceMinor", "pv", "shippable", "categoryId", "lowStockThreshold"];
+  return Object.fromEntries(keys.filter((k) => k in p).map((k) => [k, p[k] instanceof Date ? (p[k] as Date).toISOString() : (p[k] ?? null)]));
+}
+
+export async function saveVariantAction(productId: string, variantId: string | null, fd: FormData) {
+  await act(`/admin/products/${productId}`, { perm: "PRODUCTS" }, async (adminId) => {
+    const admin = await requireAdmin("PRODUCTS");
+    const costs = canSeeCosts(admin);
+    const v = variantFormSchema.parse({
+      name: str(fd, "name"), sku: str(fd, "sku"), options: str(fd, "options"), price: str(fd, "price"), salePrice: str(fd, "salePrice"),
+      costPrice: costs ? str(fd, "costPrice") : undefined, pv: str(fd, "pv"), weightGrams: str(fd, "weightGrams"),
+      lowStockThreshold: str(fd, "lowStockThreshold"), sortOrder: str(fd, "sortOrder") || "0", active: fd.get("active") === "on",
+      initialStock: variantId ? undefined : str(fd, "initialStock") || "0",
+    });
+    const data = {
+      name: v.name, sku: v.sku, options: parseAttributes(v.options.replace(/,\s*/g, "\n")),
+      priceMinor: optionalMinor(v.price), salePriceMinor: optionalMinor(v.salePrice),
+      pv: v.pv ? Number(v.pv) : null, weightGrams: v.weightGrams ? Number(v.weightGrams) : null,
+      lowStockThreshold: v.lowStockThreshold ? Number(v.lowStockThreshold) : null, sortOrder: Number(v.sortOrder || 0), active: v.active,
+      ...(costs && v.costPrice !== undefined ? { costPriceMinor: optionalMinor(v.costPrice) } : {}),
+    };
+    try {
+      await prisma.$transaction(async (tx) => {
+        const product = await tx.product.findUniqueOrThrow({ where: { id: productId } });
+        const regular = data.priceMinor ?? product.priceMinor;
+        if (data.salePriceMinor !== null && data.salePriceMinor >= regular) throw new AppError("Sale price must be below the option's regular price.");
+        if (variantId) {
+          await tx.productVariant.update({ where: { id: variantId, productId }, data });
+          await audit("variant.update", "Product", productId, adminId, { variantId, ...pick(data) } as Prisma.InputJsonObject, tx);
+        } else {
+          const isFirst = (await tx.productVariant.count({ where: { productId } })) === 0;
+          if (isFirst && product.stock > 0) throw new AppError(`This product has ${product.stock} unit(s) of stock without options. Move them to zero with an adjustment first, then add options and stock each one.`);
+          const created = await tx.productVariant.create({ data: { ...data, productId } });
+          const stock = v.initialStock ? Number(v.initialStock) : 0;
+          if (stock > 0) {
+            await tx.productVariant.update({ where: { id: created.id }, data: { stock } });
+            await tx.inventoryMovement.create({ data: { productId, variantId: created.id, delta: stock, balance: stock, reason: "RESTOCK", actorId: adminId, note: "Opening stock" } });
+          }
+          await audit("variant.create", "Product", productId, adminId, { variantId: created.id, ...pick(data) } as Prisma.InputJsonObject, tx);
+        }
+        await refreshListPrice(tx, productId);
+      });
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") throw new AppError("That option SKU is already used.");
+      throw e;
+    }
+    return "Option saved";
+  });
+}
+
 export async function adjustStockAction(productId: string, fd: FormData) {
   await act(`/admin/products/${productId}`, { perm: "PRODUCTS" }, async (adminId) => {
-    const v = z
-      .object({ delta: z.coerce.number().int().refine((n) => n !== 0, "Enter a non-zero amount"), reason: z.enum(["RESTOCK", "ADJUSTMENT"]), note: z.string().trim().min(3, "Add a note").max(300) })
-      .parse({ delta: str(fd, "delta"), reason: str(fd, "reason"), note: str(fd, "note") });
-    await prisma.$transaction(async (tx) => {
-      const r = await tx.product.updateMany({ where: { id: productId, stock: { gte: v.delta < 0 ? -v.delta : 0 } }, data: { stock: { increment: v.delta } } });
-      if (r.count === 0) throw new AppError("Stock can't go below zero.");
-      await tx.inventoryMovement.create({ data: { productId, delta: v.delta, reason: v.reason, note: v.note, actorId: adminId } });
-      await audit("inventory.adjust", "Product", productId, adminId, v, tx);
+    const variantId = str(fd, "variantId") || null;
+    const delta = z.string().trim().regex(/^[+-]?\d{1,7}$/, "Enter a whole number like +10 or -2").parse(str(fd, "delta"));
+    const balance = await adjustStock({
+      productId, variantId, delta: Number(delta), reason: z.enum(["RESTOCK", "ADJUSTMENT"]).parse(str(fd, "reason")), note: str(fd, "note"), actorId: adminId,
     });
-    return "Stock updated";
+    return `Stock updated. Now ${balance}.`;
+  });
+}
+
+export async function uploadImageAction(productId: string, fd: FormData) {
+  await act(`/admin/products/${productId}`, { perm: "PRODUCTS" }, async (adminId) => {
+    const file = fd.get("file");
+    if (!(file instanceof File) || file.size === 0) throw new AppError("Choose an image to upload.");
+    await prisma.product.findUniqueOrThrow({ where: { id: productId }, select: { id: true } });
+    await addProductImage(productId, file, str(fd, "alt"), adminId);
+    return "Image uploaded";
+  });
+}
+
+export async function imageAction(productId: string, imageId: string, op: "up" | "down" | "remove") {
+  await act(`/admin/products/${productId}`, { perm: "PRODUCTS" }, async (adminId) => {
+    const img = await prisma.productImage.findFirst({ where: { id: imageId, productId } });
+    if (!img) throw new AppError("Image not found.");
+    if (op === "remove") await removeProductImage(imageId, adminId);
+    else await moveProductImage(imageId, op === "up" ? -1 : 1);
+    return op === "remove" ? "Image removed" : "Order updated";
+  });
+}
+
+export async function receiveReturnAction(orderId: string, fd: FormData) {
+  await act(`/admin/orders/${orderId}`, { perm: "ORDERS" }, async (adminId) => {
+    const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId }, include: { items: true } });
+    const lines = order.items.map((i) => ({
+      orderItemId: i.id,
+      restock: Number(z.string().regex(/^\d{0,4}$/).parse(str(fd, `restock_${i.id}`)) || 0),
+      writeOff: Number(z.string().regex(/^\d{0,4}$/).parse(str(fd, `writeoff_${i.id}`)) || 0),
+    }));
+    await receiveReturnedItems(orderId, lines, adminId, str(fd, "note").slice(0, 300) || undefined);
+    return "Returned goods recorded";
   });
 }
 
 export async function saveCategoryAction(id: string | null, fd: FormData) {
   await act(`/admin/categories`, { perm: "PRODUCTS" }, async (adminId) => {
     const v = z
-      .object({ name: z.string().trim().min(2).max(60), slug: z.string().trim().toLowerCase().regex(/^[a-z0-9-]+$/).max(60), description: z.string().trim().max(300), sortOrder: z.coerce.number().int(), active: z.boolean() })
-      .parse({ name: str(fd, "name"), slug: str(fd, "slug"), description: str(fd, "description"), sortOrder: str(fd, "sortOrder") || "0", active: fd.get("active") === "on" });
+      .object({
+        name: z.string().trim().min(2).max(60), slug: z.string().trim().toLowerCase().regex(/^[a-z0-9-]+$/).max(60), description: z.string().trim().max(300),
+        sortOrder: z.coerce.number().int().min(-9999).max(9999), active: z.boolean(), parentId: z.string().max(40).transform((s) => s || null),
+      })
+      .parse({ name: str(fd, "name"), slug: str(fd, "slug"), description: str(fd, "description"), sortOrder: str(fd, "sortOrder") || "0", active: fd.get("active") === "on", parentId: str(fd, "parentId") });
+    if (v.parentId) {
+      if (v.parentId === id) throw new AppError("A category can't be inside itself.");
+      const parent = await prisma.category.findUnique({ where: { id: v.parentId } });
+      if (!parent || parent.parentId) throw new AppError("Choose a top-level category as the parent.");
+      if (id && (await prisma.category.count({ where: { parentId: id } })) > 0) throw new AppError("This category has subcategories, so it must stay top level.");
+    }
     try {
       const c = id ? await prisma.category.update({ where: { id }, data: v }) : await prisma.category.create({ data: v });
       await audit(id ? "category.update" : "category.create", "Category", c.id, adminId, v);
@@ -168,7 +259,7 @@ export async function deliverOrderAction(orderId: string) {
 export async function refundOrderAction(orderId: string, fd: FormData) {
   await act(`/admin/orders/${orderId}`, { perm: "ORDERS", stepUp: true }, async (adminId) => {
     if (str(fd, "confirm") !== "REFUND") throw new AppError("Type REFUND to confirm.");
-    await refundOrder(orderId, adminId, { restock: fd.get("restock") === "on", reason: str(fd, "reason").slice(0, 300) });
+    await refundOrder(orderId, adminId, { reason: str(fd, "reason").slice(0, 300) });
     return "Order refunded";
   });
 }
@@ -180,7 +271,7 @@ export async function cancelOrderAdminAction(orderId: string) {
 }
 export async function resolveReturnAction(id: string, action: "APPROVE" | "REFUND" | "REJECT", fd: FormData) {
   await act(`/admin/returns`, { perm: "ORDERS", stepUp: action === "REFUND" }, async (adminId) => {
-    await resolveReturn(id, action, adminId, { note: str(fd, "note").trim().slice(0, 500), restock: fd.get("restock") === "on" });
+    await resolveReturn(id, action, adminId, { note: str(fd, "note").trim().slice(0, 500) });
     return `Return ${action === "REFUND" ? "refunded" : action === "APPROVE" ? "approved" : "rejected"}`;
   });
 }
@@ -231,12 +322,12 @@ export async function holdCommissionAction(id: string, hold: boolean, fd: FormDa
 export async function adjustmentAction(fd: FormData) {
   await act(`/admin/commissions`, { perm: "COMMISSIONS", stepUp: true }, async (adminId) => {
     const v = z
-      .object({ email: z.string().trim().toLowerCase().email(), amount: z.coerce.number().refine((n) => n !== 0), note: z.string().trim().min(5, "Explain the adjustment").max(300) })
+      .object({ email: z.string().trim().toLowerCase().email(), amount: z.string().transform((a, ctx) => { try { const m = signedMinor(a); if (m === 0) throw 0; return m; } catch { ctx.addIssue({ code: "custom", message: "Enter a non-zero amount like -1500 or 2500.50" }); return z.NEVER; } }), note: z.string().trim().min(5, "Explain the adjustment").max(300) })
       .parse({ email: str(fd, "email"), amount: str(fd, "amount"), note: str(fd, "note") });
     const u = await prisma.user.findUnique({ where: { email: v.email } });
     if (!u) throw new AppError("No member with that email.");
     if (u.id === adminId) throw new AppError("You can't adjust your own earnings.");
-    const c = await prisma.commission.create({ data: { userId: u.id, type: "ADJUSTMENT", status: "APPROVED", approvedAt: new Date(), amountMinor: toMinor(v.amount), note: v.note } });
+    const c = await prisma.commission.create({ data: { userId: u.id, type: "ADJUSTMENT", status: "APPROVED", approvedAt: new Date(), amountMinor: v.amount, note: v.note } });
     await notify(u.id, "Commission adjustment", v.note, "/dashboard/commissions");
     await audit("commission.adjust", "Commission", c.id, adminId, { userId: u.id, amountMinor: c.amountMinor, note: v.note });
     return "Adjustment recorded";
@@ -350,7 +441,7 @@ export async function reconcileVolumeAction() {
 
 // ---------- Super admin: team and emergency operations ----------
 
-const PERMS: AdminPermission[] = ["ORDERS", "PRODUCTS", "MEMBERS", "NETWORK", "COMMISSIONS", "PAYOUTS", "SUPPORT", "RISK", "SETTINGS", "AUDIT"];
+const PERMS: AdminPermission[] = ["ORDERS", "PRODUCTS", "MEMBERS", "NETWORK", "COMMISSIONS", "PAYOUTS", "SUPPORT", "RISK", "SETTINGS", "AUDIT", "PRODUCT_COSTS"];
 
 export async function grantAdminAction(fd: FormData) {
   await act(`/admin/team`, { superOnly: true, stepUp: true }, async (adminId) => {

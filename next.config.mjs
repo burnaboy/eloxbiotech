@@ -9,6 +9,8 @@ const securityHeaders = [
 const nextConfig = {
   output: "standalone",
   poweredByHeader: false,
+  // Product image uploads go through server actions; images are limited to 5 MB in lib/images.ts.
+  experimental: { serverActions: { bodySizeLimit: "6mb" } },
   async headers() {
     return [{ source: "/(.*)", headers: securityHeaders }];
   },

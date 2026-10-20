@@ -50,6 +50,8 @@ export const DEFAULT_COMP_PLAN: CompPlan = {
 
 export const shopSettingsSchema = z.object({
   flatShippingMinor: z.number().int().min(0),
+  /// Added per started kilogram of parcel weight, on top of the flat rate. 0 = flat rate only.
+  perKgShippingMinor: z.number().int().min(0).default(0),
   freeShippingOverMinor: z.number().int().min(0),
   minPayoutMinor: z.number().int().min(0),
   orderExpiryMinutes: z.number().int().min(5),
@@ -59,6 +61,7 @@ export const shopSettingsSchema = z.object({
 export type ShopSettings = z.infer<typeof shopSettingsSchema>;
 export const DEFAULT_SHOP: ShopSettings = {
   flatShippingMinor: 250000,
+  perKgShippingMinor: 0,
   freeShippingOverMinor: 5000000,
   minPayoutMinor: 500000,
   orderExpiryMinutes: 60,

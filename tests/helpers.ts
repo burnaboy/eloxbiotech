@@ -25,7 +25,7 @@ export async function resetDb() {
     "EmailVerificationToken", "PasswordResetToken", "EmailOutbox", "ContactMessage", "Testimonial", "SupportMessage", "SupportTicket",
     "ReturnRequest", "Notification", "Address", "Category",
     "AuditLog", "Setting", "CarryMovement", "PlacementRecord", "Payout", "Commission", "BinaryRun", "WebhookEvent", "Payment", "VolumeEntry",
-    "OrderItem", "Order", "CartItem", "InventoryMovement", "Product", "AffiliateNode", "LoginAttempt", "Session", "User",
+    "OrderItem", "Order", "CartItem", "InventoryMovement", "ProductImage", "ProductVariant", "Product", "AffiliateNode", "LoginAttempt", "Session", "User",
   ];
   await prisma.$executeRawUnsafe(`TRUNCATE ${tables.map((t) => `"${t}"`).join(", ")} CASCADE`);
 }
@@ -72,7 +72,7 @@ export async function customer(sponsorCode?: string) {
 export async function product(over: Partial<{ priceMinor: number; pv: number; stock: number }> = {}) {
   const id = Math.random().toString(36).slice(2, 8);
   return prisma.product.create({
-    data: { sku: `SKU-${id}`, slug: `p-${id}`, name: `Product ${id}`, description: "x", priceMinor: 5000, pv: 100, stock: 10, ...over },
+    data: { sku: `SKU-${id}`, slug: `p-${id}`, name: `Product ${id}`, description: "x", priceMinor: 5000, listPriceMinor: over.priceMinor ?? 5000, pv: 100, stock: 10, status: "ACTIVE", ...over },
   });
 }
 

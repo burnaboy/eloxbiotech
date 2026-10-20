@@ -16,7 +16,7 @@ export function OrderSummary({ order, showPv = false }: { order: Order & { items
         <CardContent className="space-y-3 text-sm">
           {order.items.map((i) => (
             <div key={i.id} className="flex justify-between gap-2">
-              <span>{i.name} <span className="text-muted-foreground">× {i.quantity}{showPv ? ` · ${i.pv * i.quantity} PV` : ""}</span></span>
+              <span>{i.name}{i.variantName ? ` (${i.variantName})` : ""} <span className="text-muted-foreground">× {i.quantity}{showPv ? ` · ${i.pv * i.quantity} PV` : ""}</span></span>
               <span className="tabular-nums">{m(i.unitPriceMinor * i.quantity)}</span>
             </div>
           ))}

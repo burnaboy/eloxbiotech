@@ -35,6 +35,7 @@ export default async function AdminReturns({ searchParams }: { searchParams: Pro
           </div>
           <p className="rounded-md bg-muted p-3">{r.reason}</p>
           {r.adminNote && <p>Note: {r.adminNote}</p>}
+          {["REQUESTED", "APPROVED"].includes(r.status) && <p className="text-xs text-muted-foreground">Stock: unshipped orders go back to stock on refund. Shipped goods are restocked from the order page once they arrive and are inspected.</p>}
           {["REQUESTED", "APPROVED"].includes(r.status) && (
             <div className="flex flex-wrap gap-3">
               {r.status === "REQUESTED" && (
@@ -44,7 +45,6 @@ export default async function AdminReturns({ searchParams }: { searchParams: Pro
                 </form>
               )}
               <form action={resolveReturnAction.bind(null, r.id, "REFUND")} className="flex items-center gap-2">
-                <label className="flex items-center gap-1"><input type="checkbox" name="restock" className="h-4 w-4" /> Restock</label>
                 <Button>Refund now</Button>
               </form>
               <form action={resolveReturnAction.bind(null, r.id, "REJECT")} className="flex gap-2">

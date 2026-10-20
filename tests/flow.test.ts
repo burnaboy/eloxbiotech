@@ -171,7 +171,7 @@ describe("commissions", () => {
     const c = await customer(a.referralCode);
     const p = await product({ stock: 5 });
     const order = await buyAndPay(c.id, p.id);
-    await refundOrder(order.id, root.id, { restock: true });
+    await refundOrder(order.id, root.id);
     expect(await matureOrders(later(30))).toBe(0);
     expect(await prisma.commission.count({ where: { status: { not: "REVERSED" } } })).toBe(0);
     expect(await prisma.commission.count({ where: { status: "REVERSED" } })).toBe(1);
@@ -187,7 +187,7 @@ describe("commissions", () => {
     const order = await buyAndPay(c.id, p.id);
     await matureOrders(later(1));
     expect((await walletBalance(a.id)).availableMinor).toBe(500);
-    await refundOrder(order.id, root.id, { restock: false });
+    await refundOrder(order.id, root.id);
     expect((await walletBalance(a.id)).availableMinor).toBe(0);
     expect((await node(root.id)).leftCarryPv).toBe(0);
   });

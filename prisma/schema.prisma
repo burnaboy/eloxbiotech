@@ -26,6 +26,8 @@ enum AdminPermission {
   RISK
   SETTINGS
   AUDIT
+  /// See and edit product cost prices and margins.
+  PRODUCT_COSTS
 }
 
 enum ReturnStatus {
@@ -68,11 +70,26 @@ enum PaymentStatus {
 }
 
 enum InventoryReason {
+  /// New stock received from a supplier.
   RESTOCK
+  /// Reserved by a new order (before payment).
   SALE
+  /// Unpaid order cancelled or expired: reservation returned.
   RELEASE
+  /// Refund of an order that never shipped: goods never left, so they go back to stock.
   REFUND
+  /// Returned goods inspected and fit to resell.
+  RETURN_RESTOCK
+  /// Returned goods not fit to resell. Recorded with delta 0 for the audit trail.
+  RETURN_WRITE_OFF
+  /// Manual correction: stock count, damage, loss.
   ADJUSTMENT
+}
+
+enum ProductStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
 }
 
 enum CommissionType {
@@ -101,63 +118,63 @@ enum PayoutStatus {
 }
 
 model User {
-  id            String     @id @default(cuid())
+  id                     String            @id @default(cuid())
   /// Always stored lower-cased and trimmed (enforced by a CHECK constraint).
-  email         String     @unique
-  emailVerifiedAt DateTime?
-  passwordHash  String
-  emailOrderUpdates      Boolean @default(true)
-  emailCommissionUpdates Boolean @default(true)
-  emailMarketing         Boolean @default(false)
-  name          String
-  phone         String?
-  role          Role       @default(CUSTOMER)
-  status        UserStatus @default(ACTIVE)
-  referralCode  String     @unique
+  email                  String            @unique
+  emailVerifiedAt        DateTime?
+  passwordHash           String
+  emailOrderUpdates      Boolean           @default(true)
+  emailCommissionUpdates Boolean           @default(true)
+  emailMarketing         Boolean           @default(false)
+  name                   String
+  phone                  String?
+  role                   Role              @default(CUSTOMER)
+  status                 UserStatus        @default(ACTIVE)
+  referralCode           String            @unique
   /// Affiliate waiting for an administrator to choose their position (approval placement mode).
-  placementPending Boolean @default(false)
-  requestedLeg  Leg?
-  signupIp      String?
-  adminPermissions AdminPermission[]
+  placementPending       Boolean           @default(false)
+  requestedLeg           Leg?
+  signupIp               String?
+  adminPermissions       AdminPermission[]
   /// TOTP secret, encrypted with APP_ENCRYPTION_KEY.
-  mfaSecretEnc  String?
-  mfaEnabledAt  DateTime?
+  mfaSecretEnc           String?
+  mfaEnabledAt           DateTime?
   /// Last accepted TOTP time step, to stop a code being reused.
-  mfaLastStep   Int?
-  mfaRecoveryHashes String[]
-  sponsorId     String?
-  sponsor       User?      @relation("Sponsorship", fields: [sponsorId], references: [id])
-  referrals     User[]     @relation("Sponsorship")
-  createdAt     DateTime   @default(now())
-  updatedAt     DateTime   @updatedAt
+  mfaLastStep            Int?
+  mfaRecoveryHashes      String[]
+  sponsorId              String?
+  sponsor                User?             @relation("Sponsorship", fields: [sponsorId], references: [id])
+  referrals              User[]            @relation("Sponsorship")
+  createdAt              DateTime          @default(now())
+  updatedAt              DateTime          @updatedAt
 
-  sessions    Session[]
-  node        AffiliateNode?
-  cartItems   CartItem[]
-  orders      Order[]
-  commissions Commission[]
-  payouts     Payout[]
-  addresses   Address[]
+  sessions      Session[]
+  node          AffiliateNode?
+  cartItems     CartItem[]
+  orders        Order[]
+  commissions   Commission[]
+  payouts       Payout[]
+  addresses     Address[]
   notifications Notification[]
-  tickets     SupportTicket[]
-  returns     ReturnRequest[]
+  tickets       SupportTicket[]
+  returns       ReturnRequest[]
 
   @@index([sponsorId])
 }
 
 model Session {
-  id        String   @id @default(cuid())
-  tokenHash String   @unique
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  expiresAt DateTime
+  id            String    @id @default(cuid())
+  tokenHash     String    @unique
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt     DateTime
   /// True until the second factor is entered for an MFA-enabled account.
   mfaPending    Boolean   @default(false)
   lastSeenAt    DateTime  @default(now())
   mfaVerifiedAt DateTime?
-  createdAt DateTime @default(now())
-  ip        String?
-  userAgent String?
+  createdAt     DateTime  @default(now())
+  ip            String?
+  userAgent     String?
 
   @@index([userId])
 }
@@ -173,31 +190,31 @@ model LoginAttempt {
 
 /// A position in the binary tree. One per affiliate.
 model AffiliateNode {
-  id          String          @id @default(cuid())
-  userId      String          @unique
-  user        User            @relation(fields: [userId], references: [id])
-  parentId    String?
-  parent      AffiliateNode?  @relation("Tree", fields: [parentId], references: [id])
-  children    AffiliateNode[] @relation("Tree")
-  position    Leg?
-  depth       Int             @default(0)
+  id              String           @id @default(cuid())
+  userId          String           @unique
+  user            User             @relation(fields: [userId], references: [id])
+  parentId        String?
+  parent          AffiliateNode?   @relation("Tree", fields: [parentId], references: [id])
+  children        AffiliateNode[]  @relation("Tree")
+  position        Leg?
+  depth           Int              @default(0)
   /// Ancestor node ids, root first. Used to credit volume up the tree in one query.
-  ancestorIds String[]
+  ancestorIds     String[]
   /// Preferred leg for new referrals when the link doesn't specify one. Null = weaker leg.
-  defaultLeg  Leg?
+  defaultLeg      Leg?
   placementRecord PlacementRecord?
 
-  personalPv  Int @default(0)
-  leftCarryPv Int @default(0)
+  personalPv   Int @default(0)
+  leftCarryPv  Int @default(0)
   rightCarryPv Int @default(0)
-  leftTotalPv Int @default(0)
+  leftTotalPv  Int @default(0)
   rightTotalPv Int @default(0)
-  leftCount   Int @default(0)
-  rightCount  Int @default(0)
+  leftCount    Int @default(0)
+  rightCount   Int @default(0)
 
   createdAt DateTime @default(now())
 
-  volumes VolumeEntry[]
+  volumes        VolumeEntry[]
   carryMovements CarryMovement[]
 
   @@unique([parentId, position])
@@ -244,46 +261,131 @@ enum CarryReason {
 }
 
 model Category {
-  id          String    @id @default(cuid())
+  id          String     @id @default(cuid())
   name        String
-  slug        String    @unique
+  slug        String     @unique
   description String?
-  sortOrder   Int       @default(0)
-  active      Boolean   @default(true)
+  sortOrder   Int        @default(0)
+  active      Boolean    @default(true)
+  parentId    String?
+  parent      Category?  @relation("Subcategories", fields: [parentId], references: [id])
+  children    Category[] @relation("Subcategories")
   products    Product[]
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @default(now()) @updatedAt
 }
 
 model Product {
-  id                String   @id @default(cuid())
-  categoryId        String?
-  category          Category? @relation(fields: [categoryId], references: [id])
-  /// Extra gallery images; imageUrl is the main one.
-  images            String[]
-  sku               String   @unique
-  slug              String   @unique
+  id          String        @id @default(cuid())
+  categoryId  String?
+  category    Category?     @relation(fields: [categoryId], references: [id])
+  sku         String        @unique
+  slug        String        @unique
+  name        String
+  description String
+  status      ProductStatus @default(DRAFT)
+  featured    Boolean       @default(false)
+
+  /// Prices in kobo (minor units). Variants may override them.
+  priceMinor     Int
+  salePriceMinor Int?
+  saleStartsAt   DateTime?
+  saleEndsAt     DateTime?
+  /// Restricted: only staff with PRODUCT_COSTS see this. Omitted from queries by default.
+  costPriceMinor Int?
+  /// Lowest current price across the product and its variants, kept up to date for sorting and filtering.
+  /// Never used to charge anyone: checkout always recomputes from the product and variant records.
+  listPriceMinor Int       @default(0)
+  pv             Int       @default(0)
+
+  /// Stock for products without variants. Products with variants keep stock on each variant.
+  stock             Int       @default(0)
+  lowStockThreshold Int       @default(5)
+  lowStockAlertedAt DateTime?
+
+  shippable   Boolean @default(true)
+  weightGrams Int     @default(0)
+  lengthMm    Int?
+  widthMm     Int?
+  heightMm    Int?
+
+  metaTitle       String?
+  metaDescription String?
+  /// Free-form product facts shown on the product page, e.g. {"Brand": "...", "NAFDAC No.": "..."}.
+  attributes      Json    @default("{}")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  variants   ProductVariant[]
+  images     ProductImage[]
+  cartItems  CartItem[]
+  orderItems OrderItem[]
+  movements  InventoryMovement[]
+
+  @@index([status, listPriceMinor])
+  @@index([categoryId])
+}
+
+model ProductVariant {
+  id                String    @id @default(cuid())
+  productId         String
+  product           Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  sku               String    @unique
+  /// e.g. "500 ml" or "Large / Blue"
   name              String
-  description       String
-  priceMinor        Int
-  pv                Int      @default(0)
-  stock             Int      @default(0)
-  lowStockThreshold Int      @default(5)
-  weightGrams       Int      @default(0)
-  imageUrl          String?
-  active            Boolean  @default(true)
-  featured          Boolean  @default(false)
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  /// e.g. {"Size": "Large", "Colour": "Blue"}
+  options           Json      @default("{}")
+  /// Overrides; null means use the product's value.
+  priceMinor        Int?
+  salePriceMinor    Int?
+  costPriceMinor    Int?
+  pv                Int?
+  weightGrams       Int?
+  stock             Int       @default(0)
+  lowStockThreshold Int?
+  lowStockAlertedAt DateTime?
+  active            Boolean   @default(true)
+  sortOrder         Int       @default(0)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
   cartItems  CartItem[]
   orderItems OrderItem[]
   movements  InventoryMovement[]
+  images     ProductImage[]
+
+  @@index([productId])
+}
+
+model ProductImage {
+  id         String          @id @default(cuid())
+  productId  String
+  product    Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variantId  String?
+  variant    ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
+  /// Object storage key (server generated, never from the uploader's filename).
+  storageKey String          @unique
+  url        String
+  alt        String          @default("")
+  width      Int
+  height     Int
+  bytes      Int
+  sortOrder  Int             @default(0)
+  createdAt  DateTime        @default(now())
+
+  @@index([productId, sortOrder])
 }
 
 model InventoryMovement {
   id        String          @id @default(cuid())
   productId String
   product   Product         @relation(fields: [productId], references: [id])
+  variantId String?
+  variant   ProductVariant? @relation(fields: [variantId], references: [id])
   delta     Int
+  /// Stock level right after this movement, for an easy-to-read history.
+  balance   Int?
   reason    InventoryReason
   orderId   String?
   actorId   String?
@@ -294,15 +396,19 @@ model InventoryMovement {
 }
 
 model CartItem {
-  id        String   @id @default(cuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  productId String
-  product   Product  @relation(fields: [productId], references: [id])
-  quantity  Int
-  createdAt DateTime @default(now())
+  id         String          @id @default(cuid())
+  userId     String
+  user       User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  productId  String
+  product    Product         @relation(fields: [productId], references: [id])
+  variantId  String?
+  variant    ProductVariant? @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  /// variantId, or "" for products without variants. Lets the unique key below work with no variant.
+  variantKey String          @default("")
+  quantity   Int
+  createdAt  DateTime        @default(now())
 
-  @@unique([userId, productId])
+  @@unique([userId, productId, variantKey])
 }
 
 model Order {
@@ -334,14 +440,14 @@ model Order {
   shippedAt   DateTime?
   deliveredAt DateTime?
 
-  paidAt          DateTime?
+  paidAt         DateTime?
   /// Set while a chargeback is open; such orders don't earn commissions until it's resolved.
-  disputedAt      DateTime?
+  disputedAt     DateTime?
   /// Set when the refund-hold window passes and commissions + volume are credited.
-  commissionedAt  DateTime?
-  expiresAt       DateTime
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  commissionedAt DateTime?
+  expiresAt      DateTime
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   items       OrderItem[]
   payments    Payment[]
@@ -355,16 +461,24 @@ model Order {
 }
 
 model OrderItem {
-  id             String  @id @default(cuid())
+  id             String          @id @default(cuid())
   orderId        String
-  order          Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  order          Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
   productId      String
-  product        Product @relation(fields: [productId], references: [id])
+  product        Product         @relation(fields: [productId], references: [id])
+  variantId      String?
+  variant        ProductVariant? @relation(fields: [variantId], references: [id])
   name           String
+  variantName    String?
   sku            String
   unitPriceMinor Int
+  /// The regular price at the time, when the item was bought on sale.
+  listPriceMinor Int?
   pv             Int
   quantity       Int
+  /// Returned units put back into stock, and units written off, after a refund.
+  restockedQty   Int             @default(0)
+  writtenOffQty  Int             @default(0)
 }
 
 model Payment {
@@ -423,31 +537,31 @@ model Commission {
 
 /// One binary pairing run per period (e.g. per day). periodKey is unique so a run can never pay twice.
 model BinaryRun {
-  id          String   @id @default(cuid())
-  periodKey   String   @unique
-  pairsPaid   Int      @default(0)
-  amountMinor Int      @default(0)
-  flushedMinor Int     @default(0)
-  createdAt   DateTime @default(now())
-  actorId     String?
+  id           String   @id @default(cuid())
+  periodKey    String   @unique
+  pairsPaid    Int      @default(0)
+  amountMinor  Int      @default(0)
+  flushedMinor Int      @default(0)
+  createdAt    DateTime @default(now())
+  actorId      String?
 
-  commissions Commission[]
+  commissions    Commission[]
   carryMovements CarryMovement[]
 }
 
 model Payout {
-  id           String       @id @default(cuid())
-  userId       String
-  user         User         @relation(fields: [userId], references: [id])
-  amountMinor  Int
-  status       PayoutStatus @default(REQUESTED)
-  method       String
-  destination  String
-  reference    String?
+  id            String       @id @default(cuid())
+  userId        String
+  user          User         @relation(fields: [userId], references: [id])
+  amountMinor   Int
+  status        PayoutStatus @default(REQUESTED)
+  method        String
+  destination   String
+  reference     String?
   processedById String?
-  processedAt  DateTime?
-  note         String?
-  createdAt    DateTime     @default(now())
+  processedAt   DateTime?
+  note          String?
+  createdAt     DateTime     @default(now())
 
   @@index([userId, status])
 }
@@ -613,15 +727,15 @@ enum PlacementMethod {
 
 /// Immutable record of how and by whom each member was placed. Never updated or deleted.
 model PlacementRecord {
-  id         String          @id @default(cuid())
-  nodeId     String          @unique
-  node       AffiliateNode   @relation(fields: [nodeId], references: [id])
-  userId     String
-  sponsorId  String?
-  parentId   String?
-  position   Leg?
-  method     PlacementMethod
-  actorId    String?
-  note       String?
-  createdAt  DateTime        @default(now())
+  id        String          @id @default(cuid())
+  nodeId    String          @unique
+  node      AffiliateNode   @relation(fields: [nodeId], references: [id])
+  userId    String
+  sponsorId String?
+  parentId  String?
+  position  Leg?
+  method    PlacementMethod
+  actorId   String?
+  note      String?
+  createdAt DateTime        @default(now())
 }

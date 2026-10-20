@@ -23,7 +23,9 @@ export default async function AdminHome({ searchParams }: { searchParams: Promis
     prisma.payout.aggregate({ where: { status: { in: ["REQUESTED", "APPROVED"] } }, _sum: { amountMinor: true }, _count: true }),
     prisma.returnRequest.count({ where: { status: { in: ["REQUESTED", "APPROVED"] } } }),
     prisma.supportTicket.count({ where: { status: "OPEN" } }),
-    prisma.$queryRaw<{ n: bigint }[]>`SELECT COUNT(*)::bigint AS n FROM "Product" WHERE active AND stock <= "lowStockThreshold"`,
+    prisma.$queryRaw<{ n: bigint }[]>`SELECT COUNT(*)::bigint AS n FROM "Product" p WHERE p.status = 'ACTIVE' AND (
+      (NOT EXISTS (SELECT 1 FROM "ProductVariant" v WHERE v."productId" = p.id AND v.active) AND p.stock <= p."lowStockThreshold")
+      OR EXISTS (SELECT 1 FROM "ProductVariant" v WHERE v."productId" = p.id AND v.active AND v.stock <= COALESCE(v."lowStockThreshold", p."lowStockThreshold")))`,
     prisma.$queryRaw<{ day: Date; revenue: bigint; commissions: bigint }[]>`
       WITH days AS (SELECT generate_series(date_trunc('day', now() - interval '29 days'), date_trunc('day', now()), interval '1 day') AS day)
       SELECT d.day,

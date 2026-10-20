@@ -6,21 +6,25 @@ import { getCurrentUser, requireUser } from "@/lib/session";
 import { addToCart, cancelPendingOrder, createOrderFromCart, setCartQuantity, startPayment, type Address } from "@/lib/orders";
 import { runAction, str, type ActionState } from "@/lib/action";
 import { requestReturn } from "@/lib/returns";
+import { z } from "zod";
 
-export async function addToCartAction(productId: string, quantity: number, returnTo: string): Promise<ActionState> {
+const id = z.string().min(1).max(40);
+const qty = z.number().int().min(0).max(99);
+
+export async function addToCartAction(productId: string, quantity: number, returnTo: string, variantId: string | null = null): Promise<ActionState> {
   const user = await getCurrentUser();
-  if (!user) redirect(`/login?next=${encodeURIComponent(returnTo)}`);
+  if (!user) redirect(`/login?next=${encodeURIComponent(returnTo.startsWith("/") && !returnTo.startsWith("//") ? returnTo : "/")}`);
   return runAction(async () => {
-    await addToCart(user.id, productId, quantity);
+    await addToCart(user.id, id.parse(productId), qty.parse(quantity), variantId ? id.parse(variantId) : null);
     revalidatePath("/", "layout");
     return { ok: "Added to cart" };
   });
 }
 
-export async function setQuantityAction(productId: string, quantity: number): Promise<ActionState> {
+export async function setQuantityAction(productId: string, quantity: number, variantId: string | null = null): Promise<ActionState> {
   const user = await requireUser("/cart");
   return runAction(async () => {
-    await setCartQuantity(user.id, productId, quantity);
+    await setCartQuantity(user.id, id.parse(productId), qty.parse(quantity), variantId ? id.parse(variantId) : null);
     revalidatePath("/", "layout");
   });
 }

@@ -98,3 +98,8 @@ export async function endSession() {
   if (token) await destroySession(token);
   jar.delete(SESSION_COOKIE);
 }
+
+/** Cost prices and margins: super admins, and admins given PRODUCT_COSTS. */
+export function canSeeCosts(user: { role: string; adminPermissions: AdminPermission[] }) {
+  return canAccess(user, "PRODUCT_COSTS");
+}

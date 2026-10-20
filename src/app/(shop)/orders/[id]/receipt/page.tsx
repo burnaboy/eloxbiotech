@@ -42,7 +42,7 @@ export default async function ReceiptPage({ params }: { params: Promise<{ id: st
           <thead className="border-b text-left"><tr><th className="py-2">Item</th><th>Qty</th><th className="text-right">Unit</th><th className="text-right">Total</th></tr></thead>
           <tbody>
             {order.items.map((i) => (
-              <tr key={i.id} className="border-b"><td className="py-2">{i.name} <span className="text-muted-foreground">({i.sku})</span></td><td>{i.quantity}</td><td className="text-right">{m(i.unitPriceMinor)}</td><td className="text-right">{m(i.unitPriceMinor * i.quantity)}</td></tr>
+              <tr key={i.id} className="border-b"><td className="py-2">{i.name}{i.variantName ? ` (${i.variantName})` : ""} <span className="text-muted-foreground">({i.sku})</span></td><td>{i.quantity}</td><td className="text-right">{m(i.unitPriceMinor)}</td><td className="text-right">{m(i.unitPriceMinor * i.quantity)}</td></tr>
             ))}
           </tbody>
           <tfoot>

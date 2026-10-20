@@ -128,7 +128,7 @@ describe("volume ledger", () => {
     expect(v.left.netPv).toBe(300);
 
     // Refund the 300 PV order: only 200 is left in carry, so carry floors at zero.
-    await refundOrder(o1.id, root.id, { restock: false });
+    await refundOrder(o1.id, root.id);
     const n = await node(root.id);
     expect(n.leftCarryPv).toBe(0);
     v = await volumeSummary(n);

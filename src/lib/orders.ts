@@ -10,6 +10,8 @@ import { audit } from "./audit";
 import { holdOrderCommissions, onOrderPaid, releaseOrderCommissions, reverseOrderCommissions } from "./commissions";
 import { notify } from "./notify";
 import { requireVerified } from "./email-verification";
+import { unitPrice } from "./catalog";
+import { reserveStock, returnStock } from "./inventory";
 
 export const MAX_QTY = 99;
 
@@ -27,41 +29,88 @@ export type Address = z.infer<typeof addressSchema>;
 
 // ---------- Cart ----------
 
-export async function setCartQuantity(userId: string, productId: string, quantity: number) {
+const cartInclude = {
+  product: {
+    include: {
+      variants: { where: { active: true }, select: { id: true, active: true } },
+      images: { orderBy: { sortOrder: "asc" }, take: 1, select: { url: true, alt: true, width: true, height: true } },
+    },
+  },
+  variant: true,
+} as const;
+
+/** Sets a cart line. Pass the variant for products that have variants. Prices are never taken from the client. */
+export async function setCartQuantity(userId: string, productId: string, quantity: number, variantId: string | null = null) {
   const qty = Math.floor(quantity);
   if (!Number.isFinite(qty) || qty < 0 || qty > MAX_QTY) throw new AppError("Invalid quantity.");
+  const variantKey = variantId ?? "";
   if (qty === 0) {
-    await prisma.cartItem.deleteMany({ where: { userId, productId } });
+    await prisma.cartItem.deleteMany({ where: { userId, productId, variantKey } });
     return;
   }
-  const product = await prisma.product.findUnique({ where: { id: productId } });
-  if (!product || !product.active) throw new AppError("This product is not available.");
-  if (product.stock < qty) throw new AppError(`Only ${product.stock} left in stock.`);
+  const product = await prisma.product.findUnique({ where: { id: productId }, include: { variants: { where: { active: true } } } });
+  if (!product || product.status !== "ACTIVE") throw new AppError("This product is not available.");
+  if (!product.shippable) throw new AppError("This product can't be delivered at the moment.");
+  let available = product.stock;
+  if (product.variants.length) {
+    const v = product.variants.find((x) => x.id === variantId);
+    if (!v) throw new AppError("Please choose an option.");
+    available = v.stock;
+  } else if (variantId) {
+    throw new AppError("This product has no options.");
+  }
+  if (available < qty) throw new AppError(available === 0 ? "This item is out of stock." : `Only ${available} left in stock.`);
   await prisma.cartItem.upsert({
-    where: { userId_productId: { userId, productId } },
-    create: { userId, productId, quantity: qty },
+    where: { userId_productId_variantKey: { userId, productId, variantKey } },
+    create: { userId, productId, variantId, variantKey, quantity: qty },
     update: { quantity: qty },
   });
 }
 
-export async function addToCart(userId: string, productId: string, quantity = 1) {
-  const existing = await prisma.cartItem.findUnique({ where: { userId_productId: { userId, productId } } });
-  await setCartQuantity(userId, productId, (existing?.quantity ?? 0) + quantity);
+export async function addToCart(userId: string, productId: string, quantity = 1, variantId: string | null = null) {
+  const existing = await prisma.cartItem.findUnique({ where: { userId_productId_variantKey: { userId, productId, variantKey: variantId ?? "" } } });
+  await setCartQuantity(userId, productId, (existing?.quantity ?? 0) + quantity, variantId);
+}
+
+type CartRow = Awaited<ReturnType<typeof loadCartRows>>[number];
+function loadCartRows(tx: Tx, userId: string) {
+  return tx.cartItem.findMany({ where: { userId }, include: cartInclude, orderBy: { createdAt: "asc" } });
+}
+
+/** Prices each cart line from the database. A line is unavailable if the product or option was withdrawn or is short. */
+function priceLines(items: CartRow[], now = new Date()) {
+  return items.map((i) => {
+    const price = unitPrice(i.product, i.variant, now);
+    const needsVariant = i.product.variants.length > 0;
+    const variantOk = needsVariant ? !!i.variant?.active && i.product.variants.some((v) => v.id === i.variantId) : !i.variantId;
+    const stock = i.variant ? i.variant.stock : i.product.stock;
+    const problem =
+      i.product.status !== "ACTIVE" ? "No longer available"
+      : !i.product.shippable ? "Can't be delivered at the moment"
+      : !variantOk ? "This option is no longer available"
+      : stock < i.quantity ? (stock === 0 ? "Out of stock" : `Only ${stock} left`)
+      : null;
+    const weight = (i.variant?.weightGrams ?? i.product.weightGrams) * i.quantity;
+    return { ...i, ...price, lineMinor: price.unitMinor * i.quantity, linePv: price.pv * i.quantity, weightGrams: weight, problem };
+  });
 }
 
 export async function getCart(userId: string) {
-  const items = await prisma.cartItem.findMany({ where: { userId }, include: { product: true }, orderBy: { createdAt: "asc" } });
-  const shop = await getShopSettings();
-  const subtotalMinor = items.reduce((s, i) => s + i.product.priceMinor * i.quantity, 0);
-  const totalPv = items.reduce((s, i) => s + i.product.pv * i.quantity, 0);
-  const shippingMinor = shippingFor(subtotalMinor, shop);
-  return { items, subtotalMinor, shippingMinor, totalMinor: subtotalMinor + shippingMinor, totalPv };
+  const [rows, shop] = await Promise.all([loadCartRows(prisma, userId), getShopSettings()]);
+  const items = priceLines(rows);
+  const subtotalMinor = items.reduce((s, i) => s + i.lineMinor, 0);
+  const totalPv = items.reduce((s, i) => s + i.linePv, 0);
+  const weightGrams = items.reduce((s, i) => s + i.weightGrams, 0);
+  const shippingMinor = shippingFor(subtotalMinor, weightGrams, shop);
+  return { items, subtotalMinor, shippingMinor, totalMinor: subtotalMinor + shippingMinor, totalPv, weightGrams };
 }
 
-function shippingFor(subtotal: number, shop: { flatShippingMinor: number; freeShippingOverMinor: number }) {
+/** Flat rate, plus an optional per-kilogram charge, free above the threshold. All integers. */
+export function shippingFor(subtotal: number, weightGrams: number, shop: { flatShippingMinor: number; perKgShippingMinor?: number; freeShippingOverMinor: number }) {
   if (subtotal === 0) return 0;
   if (shop.freeShippingOverMinor > 0 && subtotal >= shop.freeShippingOverMinor) return 0;
-  return shop.flatShippingMinor;
+  const kg = Math.ceil(Math.max(0, weightGrams) / 1000);
+  return shop.flatShippingMinor + (shop.perKgShippingMinor ?? 0) * kg;
 }
 
 // ---------- Checkout ----------
@@ -71,7 +120,10 @@ function orderNumber() {
   return `NN${d}-${randomBytes(3).toString("hex").toUpperCase()}`;
 }
 
-/** Turns the cart into an order, reserving stock atomically. Fails without side effects if anything is short. */
+/**
+ * Turns the cart into an order. Prices, sale prices, PV and shipping are recomputed here from product records;
+ * stock is reserved atomically. Fails without side effects if anything is short or has changed.
+ */
 export async function createOrderFromCart(userId: string, rawAddress: Address) {
   const address = addressSchema.parse(rawAddress);
   const [shop, brand, ops] = await Promise.all([getShopSettings(), getBrand(), getOps()]);
@@ -80,20 +132,14 @@ export async function createOrderFromCart(userId: string, rawAddress: Address) {
   const order = await prisma.$transaction(async (tx) => {
     const user = await tx.user.findUniqueOrThrow({ where: { id: userId }, include: { node: true, sponsor: { include: { node: true } } } });
     requireVerified(user, "placing an order");
-    const items = await tx.cartItem.findMany({ where: { userId }, include: { product: true } });
+    const items = priceLines(await loadCartRows(tx, userId));
     if (!items.length) throw new AppError("Your cart is empty.");
+    const bad = items.find((i) => i.problem);
+    if (bad) throw new AppError(`${bad.product.name}: ${bad.problem}. Please update your cart.`, 409);
 
-    for (const item of items) {
-      const res = await tx.product.updateMany({
-        where: { id: item.productId, active: true, stock: { gte: item.quantity } },
-        data: { stock: { decrement: item.quantity } },
-      });
-      if (res.count === 0) throw new AppError(`Not enough stock for ${item.product.name}.`, 409);
-    }
-
-    const subtotalMinor = items.reduce((s, i) => s + i.product.priceMinor * i.quantity, 0);
-    const shippingMinor = shippingFor(subtotalMinor, shop);
-    const totalPv = items.reduce((s, i) => s + i.product.pv * i.quantity, 0);
+    const subtotalMinor = items.reduce((s, i) => s + i.lineMinor, 0);
+    const shippingMinor = shippingFor(subtotalMinor, items.reduce((s, i) => s + i.weightGrams, 0), shop);
+    const totalPv = items.reduce((s, i) => s + i.linePv, 0);
 
     const order = await tx.order.create({
       data: {
@@ -113,18 +159,21 @@ export async function createOrderFromCart(userId: string, rawAddress: Address) {
         items: {
           create: items.map((i) => ({
             productId: i.productId,
+            variantId: i.variantId,
             name: i.product.name,
-            sku: i.product.sku,
-            unitPriceMinor: i.product.priceMinor,
-            pv: i.product.pv,
+            variantName: i.variant?.name ?? null,
+            sku: i.variant?.sku ?? i.product.sku,
+            unitPriceMinor: i.unitMinor,
+            listPriceMinor: i.compareAtMinor,
+            pv: i.pv,
             quantity: i.quantity,
           })),
         },
       },
     });
-    await tx.inventoryMovement.createMany({
-      data: items.map((i) => ({ productId: i.productId, delta: -i.quantity, reason: "SALE" as const, orderId: order.id })),
-    });
+    for (const i of items) {
+      await reserveStock(tx, { productId: i.productId, variantId: i.variantId, quantity: i.quantity }, order.id, i.variant ? `${i.product.name} (${i.variant.name})` : i.product.name);
+    }
     await tx.cartItem.deleteMany({ where: { userId } });
     await audit("order.create", "Order", order.id, userId, { total: order.totalMinor }, tx);
     return order;
@@ -199,7 +248,7 @@ export async function applyPaymentEvent(providerName: string, event: PaymentEven
       case "payment.refunded": {
         // Refund done in the gateway dashboard. If we started it ourselves the order is already REFUNDED.
         if (!PAID_STATES.includes(order.status)) return { status: "ignored" as const };
-        await applyRefund(tx, order.id, null, { restock: false, reason: "Refunded in payment gateway" });
+        await applyRefund(tx, order.id, null, { reason: "Refunded in payment gateway" });
         return { status: "refunded" as const };
       }
       case "dispute.opened": {
@@ -210,7 +259,7 @@ export async function applyPaymentEvent(providerName: string, event: PaymentEven
       }
       case "dispute.resolved": {
         if (event.merchantLost && PAID_STATES.includes(order.status)) {
-          await applyRefund(tx, order.id, null, { restock: false, reason: "Chargeback" });
+          await applyRefund(tx, order.id, null, { reason: "Chargeback" });
           return { status: "charged_back" as const };
         }
         await tx.order.update({ where: { id: order.id }, data: { disputedAt: null } });
@@ -250,11 +299,8 @@ export async function reconcilePendingPayments(olderThanMinutes = 5) {
 async function releaseStock(tx: Tx, orderId: string, reason: "RELEASE" | "REFUND", actorId: string | null) {
   const items = await tx.orderItem.findMany({ where: { orderId } });
   for (const i of items) {
-    await tx.product.update({ where: { id: i.productId }, data: { stock: { increment: i.quantity } } });
+    await returnStock(tx, { productId: i.productId, variantId: i.variantId, quantity: i.quantity }, reason, { orderId, actorId });
   }
-  await tx.inventoryMovement.createMany({
-    data: items.map((i) => ({ productId: i.productId, delta: i.quantity, reason, orderId, actorId })),
-  });
 }
 
 export async function cancelPendingOrder(orderId: string, actorId: string | null, opts: { userId?: string } = {}) {
@@ -307,7 +353,7 @@ export async function updateFulfilment(orderId: string, to: "SHIPPED" | "DELIVER
 const PAID_STATES: OrderStatus[] = ["PAID", "SHIPPED", "DELIVERED"];
 
 /** Full refund started by an admin: refunds through the gateway, then updates our records. */
-export async function refundOrder(orderId: string, actorId: string, opts: { restock: boolean; reason?: string }) {
+export async function refundOrder(orderId: string, actorId: string, opts: { reason?: string } = {}) {
   const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId }, include: { payments: true } });
   if (!PAID_STATES.includes(order.status)) throw new AppError("Only paid orders can be refunded.");
   const paid = order.payments.find((p) => p.status === "SUCCEEDED");
@@ -317,14 +363,19 @@ export async function refundOrder(orderId: string, actorId: string, opts: { rest
 
 export { applyRefund };
 
-/** Marks an order refunded, optionally restocks, and reverses commissions/volume if already credited. */
-async function applyRefund(tx: Tx, orderId: string, actorId: string | null, opts: { restock: boolean; reason?: string }) {
+/**
+ * Marks an order refunded and reverses commissions/volume if already credited.
+ * Restocking policy (see inventory.ts): an order that never shipped goes straight back to stock;
+ * shipped goods return to stock only when staff record them as received and resellable.
+ */
+async function applyRefund(tx: Tx, orderId: string, actorId: string | null, opts: { reason?: string }) {
+  const before = await tx.order.findUniqueOrThrow({ where: { id: orderId } });
   const moved = await tx.order.updateMany({ where: { id: orderId, status: { in: PAID_STATES } }, data: { status: "REFUNDED" } });
   if (moved.count === 0) throw new AppError("Order was already refunded.");
   await tx.payment.updateMany({ where: { orderId, status: "SUCCEEDED" }, data: { status: "REFUNDED" } });
-  if (opts.restock) await releaseStock(tx, orderId, "REFUND", actorId);
-  const order = await tx.order.findUniqueOrThrow({ where: { id: orderId } });
-  await reverseOrderCommissions(tx, order.id, actorId, opts.reason?.startsWith("Chargeback") ? "Chargeback" : "Refund");
-  await notify(order.userId, "Order refunded", `Order ${order.number} has been refunded.`, `/orders/${orderId}`, tx, "order");
-  await audit("order.refund", "Order", orderId, actorId, { restock: opts.restock, reason: opts.reason ?? null }, tx);
+  const restocked = !before.shippedAt;
+  if (restocked) await releaseStock(tx, orderId, "REFUND", actorId);
+  await reverseOrderCommissions(tx, orderId, actorId, opts.reason?.startsWith("Chargeback") ? "Chargeback" : "Refund");
+  await notify(before.userId, "Order refunded", `Order ${before.number} has been refunded.`, `/orders/${orderId}`, tx, "order");
+  await audit("order.refund", "Order", orderId, actorId, { restocked, awaitingReturn: !restocked, reason: opts.reason ?? null }, tx);
 }

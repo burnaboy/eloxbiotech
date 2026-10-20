@@ -9,13 +9,14 @@ import { Empty } from "@/components/ui/table";
 import { Alert } from "@/components/ui/alert";
 import { ProductImage } from "@/components/product-card";
 import { CartQuantity } from "@/components/cart-line";
+import { Price } from "@/components/price";
 
 export const metadata = { title: "Cart" };
 
 export default async function CartPage() {
   const user = await requireUser("/cart");
   const [cart, brand] = await Promise.all([getCart(user.id), getBrand()]);
-  const short = cart.items.filter((i) => !i.product.active || i.product.stock < i.quantity);
+  const short = cart.items.filter((i) => i.problem);
   return (
     <div className="container py-10">
       <h1 className="mb-6 text-3xl font-semibold tracking-tight">Your cart</h1>
@@ -25,14 +26,16 @@ export default async function CartPage() {
         <div className="grid gap-8 lg:grid-cols-[1fr_340px]">
           <ul className="divide-y rounded-lg border bg-card">
             {cart.items.map((i) => (
-              <li key={i.id} className="flex items-center gap-4 p-4">
-                <ProductImage product={i.product} className="!w-20 rounded-md" />
-                <div className="flex-1">
+              <li key={i.id} className="flex flex-wrap items-center gap-4 p-4">
+                <ProductImage image={i.product.images[0]} name={i.product.name} className="!w-20 rounded-md" />
+                <div className="min-w-0 flex-1">
                   <Link href={`/products/${i.product.slug}`} className="font-medium hover:underline">{i.product.name}</Link>
-                  <p className="text-sm text-muted-foreground">{formatMoney(i.product.priceMinor, brand.currency)} each</p>
+                  {i.variant && <p className="text-sm">{i.variant.name}</p>}
+                  <p className="text-sm text-muted-foreground"><Price unitMinor={i.unitMinor} compareAtMinor={i.compareAtMinor} currency={brand.currency} /> each</p>
+                  {i.problem && <p className="text-sm font-medium text-destructive">{i.problem}</p>}
                 </div>
-                <CartQuantity productId={i.productId} quantity={i.quantity} max={i.product.stock} />
-                <p className="w-28 text-right font-medium tabular-nums">{formatMoney(i.product.priceMinor * i.quantity, brand.currency)}</p>
+                <CartQuantity productId={i.productId} variantId={i.variantId} quantity={i.quantity} max={i.variant ? i.variant.stock : i.product.stock} />
+                <p className="w-28 text-right font-medium tabular-nums">{formatMoney(i.lineMinor, brand.currency)}</p>
               </li>
             ))}
           </ul>

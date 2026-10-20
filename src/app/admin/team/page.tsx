@@ -11,7 +11,7 @@ import { grantAdminAction, promoteSuperAction, revokeAdminAction, setAdminPermis
 const PERMS: { p: AdminPermission; label: string }[] = [
   { p: "ORDERS", label: "Orders & returns" }, { p: "PRODUCTS", label: "Products" }, { p: "MEMBERS", label: "Members" },
   { p: "NETWORK", label: "Network" }, { p: "COMMISSIONS", label: "Commissions" }, { p: "PAYOUTS", label: "Payouts" },
-  { p: "SUPPORT", label: "Support" }, { p: "RISK", label: "Risk" }, { p: "SETTINGS", label: "Settings" }, { p: "AUDIT", label: "Audit log" },
+  { p: "SUPPORT", label: "Support" }, { p: "RISK", label: "Risk" }, { p: "SETTINGS", label: "Settings" }, { p: "AUDIT", label: "Audit log" }, { p: "PRODUCT_COSTS", label: "Cost prices" },
 ];
 
 function PermBoxes({ current }: { current?: AdminPermission[] }) {
