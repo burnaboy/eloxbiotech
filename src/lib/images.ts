@@ -4,6 +4,7 @@ import { prisma } from "./db";
 import { AppError } from "./errors";
 import { getStorage } from "./storage";
 import { audit } from "./audit";
+import { logError } from "./log";
 
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 export const MAX_IMAGES_PER_PRODUCT = 12;
@@ -56,7 +57,7 @@ export async function addProductImage(productId: string, file: File, alt: string
 
 export async function removeProductImage(imageId: string, actorId: string) {
   const img = await prisma.productImage.delete({ where: { id: imageId } });
-  if (!img.storageKey.startsWith("external:")) await getStorage().remove(img.storageKey).catch((e) => console.error("storage delete failed", e));
+  if (!img.storageKey.startsWith("external:")) await getStorage().remove(img.storageKey).catch((e) => logError("storage delete", e));
   await audit("product.imageRemove", "Product", img.productId, actorId, { imageId, key: img.storageKey });
   return img;
 }

@@ -1,4 +1,5 @@
 import type { AdminPermission } from "@prisma/client";
+import { ConfirmAction, ReasonFields } from "@/components/admin/high-risk";
 import { requireSuperAdmin } from "@/lib/session";
 import { prisma } from "@/lib/db";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,7 +12,7 @@ import { grantAdminAction, promoteSuperAction, revokeAdminAction, setAdminPermis
 const PERMS: { p: AdminPermission; label: string }[] = [
   { p: "ORDERS", label: "Orders & returns" }, { p: "PRODUCTS", label: "Products" }, { p: "MEMBERS", label: "Members" },
   { p: "NETWORK", label: "Network" }, { p: "COMMISSIONS", label: "Commissions" }, { p: "PAYOUTS", label: "Payouts" },
-  { p: "SUPPORT", label: "Support" }, { p: "RISK", label: "Risk" }, { p: "SETTINGS", label: "Settings" }, { p: "AUDIT", label: "Audit log" }, { p: "PRODUCT_COSTS", label: "Cost prices" },
+  { p: "SUPPORT", label: "Support" }, { p: "RISK", label: "Risk" }, { p: "SETTINGS", label: "Settings" }, { p: "AUDIT", label: "Audit log" }, { p: "PRODUCT_COSTS", label: "Cost prices" }, { p: "PAYOUT_DETAILS", label: "Bank details and transfer files" },
 ];
 
 function PermBoxes({ current }: { current?: AdminPermission[] }) {
@@ -38,6 +39,7 @@ export default async function Team({ searchParams }: { searchParams: Promise<{ o
           <form action={grantAdminAction} className="space-y-3">
             <Input name="email" type="email" placeholder="Their account email" aria-label="Email" required className="max-w-sm" />
             <PermBoxes />
+            <div className="max-w-sm"><ReasonFields idPrefix="grant" /></div>
             <Button>Grant access</Button>
           </form>
         </CardContent>
@@ -53,13 +55,14 @@ export default async function Team({ searchParams }: { searchParams: Promise<{ o
           {a.role === "ADMIN" && (
             <form action={setAdminPermissionsAction.bind(null, a.id)} className="space-y-2">
               <PermBoxes current={a.adminPermissions} />
+              <div className="max-w-sm"><ReasonFields idPrefix={`perm-${a.id}`} /></div>
               <Button size="sm" variant="outline">Save permissions</Button>
             </form>
           )}
           {a.id !== me.id && (
             <div className="flex gap-2">
-              {a.role === "ADMIN" && <form action={promoteSuperAction.bind(null, a.id)}><Button size="sm" variant="outline">Make super admin</Button></form>}
-              <form action={revokeAdminAction.bind(null, a.id)}><Button size="sm" variant="ghost" className="text-destructive">Remove admin access</Button></form>
+              {a.role === "ADMIN" && <ConfirmAction id={`promote-${a.id}`} action={promoteSuperAction.bind(null, a.id)} label="Make super admin" confirm="PROMOTE" size="sm" description="Super admins can change the compensation plan, tax and withdrawal settings, and other admins' access." />}
+              <ConfirmAction id={`revoke-${a.id}`} action={revokeAdminAction.bind(null, a.id)} label="Remove admin access" confirm="REMOVE" size="sm" variant="destructive" />
             </div>
           )}
         </Card>

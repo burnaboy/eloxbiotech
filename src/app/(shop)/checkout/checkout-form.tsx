@@ -23,7 +23,7 @@ const schema = z.object({
 });
 type V = z.infer<typeof schema>;
 
-export function CheckoutForm({ defaults }: { defaults: Partial<V> }) {
+export function CheckoutForm({ defaults, checkoutKey }: { defaults: Partial<V>; checkoutKey: string }) {
   const [pending, start] = useTransition();
   const [error, setError] = useState<string>();
   const { register, handleSubmit, formState } = useForm<V>({ resolver: zodResolver(schema), defaultValues: { shipCountry: "Nigeria", ...defaults } });
@@ -34,7 +34,7 @@ export function CheckoutForm({ defaults }: { defaults: Partial<V> }) {
     </Field>
   );
   return (
-    <form noValidate className="space-y-4" onSubmit={handleSubmit((v) => start(async () => setError((await checkoutAction(v))?.error)))}>
+    <form noValidate className="space-y-4" onSubmit={handleSubmit((v) => start(async () => setError((await checkoutAction(v, checkoutKey))?.error)))}>
       {error && <Alert tone="error">{error}</Alert>}
       <div className="grid gap-4 sm:grid-cols-2">
         {f("shipName", "Recipient name", { autoComplete: "name" })}

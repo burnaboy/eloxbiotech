@@ -25,15 +25,23 @@ export async function ancestorLegs(tx: Tx, node: Pick<AffiliateNode, "id" | "anc
   return out;
 }
 
-/** Walks down the outside edge of `leg` under `start` to the first empty slot. */
+/**
+ * Finds the bottom of the outside edge of `leg` under `start` (the first node with no child on that leg).
+ * One recursive query instead of one query per level, so a long spillover edge stays cheap. Each step uses
+ * the unique (parentId, position) index.
+ */
 export async function outermostSlot(tx: Tx, start: AffiliateNode, leg: Leg) {
-  let parent = start;
-  for (let guard = 0; guard < 100_000; guard++) {
-    const child = await tx.affiliateNode.findUnique({ where: { parentId_position: { parentId: parent.id, position: leg } } });
-    if (!child) return parent;
-    parent = child;
-  }
-  throw new Error("Tree depth limit reached");
+  const rows = await tx.$queryRaw<{ id: string }[]>`
+    WITH RECURSIVE edge AS (
+      SELECT n.id, 0 AS steps FROM "AffiliateNode" n WHERE n.id = ${start.id}
+      UNION ALL
+      SELECT c.id, e.steps + 1 FROM edge e
+      JOIN "AffiliateNode" c ON c."parentId" = e.id AND c.position = ${leg}::"Leg"
+      WHERE e.steps < 100000
+    )
+    SELECT id FROM edge ORDER BY steps DESC LIMIT 1`;
+  if (!rows[0]) throw new Error("Placement start node not found");
+  return rows[0].id === start.id ? start : tx.affiliateNode.findUniqueOrThrow({ where: { id: rows[0].id } });
 }
 
 export interface PlaceOptions {

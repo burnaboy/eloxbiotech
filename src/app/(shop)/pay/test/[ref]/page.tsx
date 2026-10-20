@@ -4,7 +4,7 @@ import { prisma } from "@/lib/db";
 import { requireUser } from "@/lib/session";
 import { formatMoney } from "@/lib/money";
 import { buildTestEvent, testProvider } from "@/lib/payments/test-provider";
-import { applyPaymentEvent } from "@/lib/orders";
+import { applyPaymentEvent } from "@/lib/payments/service";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -23,7 +23,7 @@ async function simulate(ref: string, outcome: "succeeded" | "failed") {
   // Goes through the same signature check as a real webhook.
   const { body, signature } = buildTestEvent({ type: `payment.${outcome}`, providerRef: ref, amountMinor: p.amountMinor, currency: p.currency });
   const event = await testProvider.parseWebhook(body, new Headers({ "x-test-signature": signature }));
-  if (event) await applyPaymentEvent("test", event);
+  if (event) await applyPaymentEvent("test", event, "webhook", JSON.parse(body));
   redirect(`/orders/${p.orderId}?paid=${outcome === "succeeded" ? "1" : ""}${outcome === "failed" ? "&error=Payment%20was%20declined" : ""}`);
 }
 

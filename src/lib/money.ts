@@ -1,3 +1,5 @@
+import { AppError } from "./errors";
+
 /** All money is stored as integer minor units (kobo for NGN). No binary floating point is used for amounts. */
 export function formatMoney(minor: number, currency = "NGN"): string {
   // Display only: split into whole and fractional parts with integer maths.
@@ -42,4 +44,19 @@ export function signedMinor(v: string) {
   const s = String(v).trim();
   if (s.startsWith("-")) return -toMinor(s.slice(1));
   return toMinor(s.replace(/^\+/, ""));
+}
+
+/** "10.5" (percent) -> 1050 basis points, without floating point. */
+export function percentToBps(input: string) {
+  const m = /^(\d{1,3})(?:\.(\d{1,2}))?$/.exec(input.trim().replace(/%$/, ""));
+  if (!m) throw new AppError("Enter a percentage like 10 or 7.5 (up to two decimal places).");
+  const bps = Number(m[1]) * 100 + Number((m[2] ?? "").padEnd(2, "0"));
+  if (bps > 10_000) throw new AppError("A percentage can't be more than 100.");
+  return bps;
+}
+
+/** 1050 -> "10.5" for form fields. */
+export function bpsToPercent(bps: number) {
+  const frac = String(bps % 100).padStart(2, "0").replace(/0+$/, "");
+  return `${Math.trunc(bps / 100)}${frac ? `.${frac}` : ""}`;
 }

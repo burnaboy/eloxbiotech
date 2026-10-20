@@ -8,11 +8,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Flash } from "@/components/flash";
-import { reconcilePendingPayments } from "@/lib/orders";
+import { paymentIssues, reconcilePendingPayments } from "@/lib/payments/service";
+import { sharedAccounts } from "@/lib/payouts/accounts";
 import { redirect } from "next/navigation";
 import type { AuditLog } from "@prisma/client";
 import type { ReconcileIssue } from "@/lib/volume";
-import { reconcileVolumeAction } from "../actions";
+import { reconcileLedgerAction, reconcileVolumeAction } from "../actions";
 
 function LedgerCheck({ last }: { last: AuditLog | null }) {
   const d = last?.data as { nodes?: number; orders?: number; issueCount?: number; issues?: ReconcileIssue[] } | null;
@@ -29,11 +30,37 @@ function LedgerCheck({ last }: { last: AuditLog | null }) {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-2 text-sm">
-        <form action={reconcileVolumeAction}><Button size="sm" variant="outline">Run check now</Button></form>
+        <form action={reconcileVolumeAction}><Button size="sm" variant="outline">Check network volume</Button></form>
         {count > 0 && (
           <ul className="space-y-1">
             {d?.issues?.map((i, k) => <li key={k}><Badge tone="warning">{i.kind}</Badge> <span className="font-medium">{i.ref}</span> · {i.detail}</li>)}
             {count > (d?.issues?.length ?? 0) && <li className="text-muted-foreground">…and {count - (d?.issues?.length ?? 0)} more.</li>}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function WalletCheck({ last }: { last: AuditLog | null }) {
+  const d = last?.data as { ok?: boolean; problemCount?: number; members?: number; commissions?: number; problems?: { kind: string; userId?: string; ref?: string; detail: string }[] } | null;
+  const count = d?.problemCount ?? 0;
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          Wallet ledger check {last ? <Badge tone={count ? "danger" : "success"}>{count ? `${count} problem(s)` : "all match"}</Badge> : <Badge>not run yet</Badge>}
+        </CardTitle>
+        <CardDescription>
+          Checks every commission&apos;s money is in the right wallet bucket for its status and amount after reversals, and every member&apos;s reserved and paid-out balances equal their open and paid withdrawals.
+          Reports only. Runs daily; {last ? `last run ${formatDate(last.createdAt)} over ${d?.members ?? 0} wallets and ${d?.commissions ?? 0} commissions.` : "it hasn't run yet."}
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-2 text-sm">
+        <form action={reconcileLedgerAction}><Button size="sm" variant="outline">Check wallets</Button></form>
+        {count > 0 && (
+          <ul className="space-y-1">
+            {d?.problems?.map((p, k) => <li key={k}><Badge tone="warning">{p.kind}</Badge> {p.userId && <Link className="text-primary underline" href={`/admin/users/${p.userId}`}>member</Link>} · {p.detail}</li>)}
           </ul>
         )}
       </CardContent>
@@ -65,17 +92,19 @@ export default async function Risk({ searchParams }: { searchParams: Promise<{ o
   const brand = await getBrand();
   const m = (v: number) => formatMoney(v, brand.currency);
   const hourAgo = new Date(Date.now() - 3600e3);
-  const [lastCheck, flagged, stalePayments, disputes, sharedIps, bigPayouts, selfBuys, failedLogins] = await Promise.all([
+  const [lastCheck, lastWalletCheck, issues, banks, stalePayments, disputes, sharedIps, bigPayouts, selfBuys, failedLogins] = await Promise.all([
     prisma.auditLog.findFirst({ where: { action: "volume.reconcile" }, orderBy: { createdAt: "desc" } }),
-    prisma.auditLog.findMany({ where: { action: { in: ["payment.amountMismatch", "payment.needsReview"] } }, orderBy: { createdAt: "desc" }, take: 50 }),
+    prisma.auditLog.findFirst({ where: { action: "ledger.reconcile" }, orderBy: { createdAt: "desc" } }),
+    paymentIssues(),
+    sharedAccounts(),
     prisma.payment.findMany({ where: { status: "PENDING", createdAt: { lt: hourAgo }, order: { status: "PENDING_PAYMENT" } }, include: { order: true }, take: 50 }),
     prisma.order.findMany({ where: { disputedAt: { not: null } }, take: 50 }),
     prisma.$queryRaw<{ ip: string; n: bigint }[]>`SELECT "signupIp" AS ip, COUNT(*)::bigint AS n FROM "User" WHERE "signupIp" IS NOT NULL AND "signupIp" <> 'unknown' GROUP BY "signupIp" HAVING COUNT(*) >= 3 ORDER BY n DESC LIMIT 20`,
-    prisma.payout.findMany({ where: { status: { in: ["REQUESTED", "APPROVED"] } }, include: { user: true }, orderBy: { amountMinor: "desc" }, take: 5 }),
+    prisma.payout.findMany({ where: { status: { in: ["REQUESTED", "APPROVED", "PROCESSING"] } }, include: { user: true }, orderBy: { amountMinor: "desc" }, take: 5 }),
     // Affiliates whose earnings come mostly from their own customers' orders shipped to their own phone number.
     prisma.$queryRaw<{ id: string; number: string; name: string }[]>`
       SELECT o.id, o.number, r.name FROM "Order" o JOIN "User" r ON r.id = o."referrerId"
-      WHERE o.status IN ('PAID','SHIPPED','DELIVERED') AND r.phone IS NOT NULL AND o."shipPhone" = r.phone
+      WHERE o.status IN ('PAID','PROCESSING','SHIPPED','DELIVERED','PARTIALLY_REFUNDED') AND r.phone IS NOT NULL AND o."shipPhone" = r.phone
       ORDER BY o."createdAt" DESC LIMIT 20`,
     prisma.loginAttempt.groupBy({ by: ["key"], where: { success: false, createdAt: { gte: new Date(Date.now() - 864e5) } }, _count: true, having: { key: { _count: { gte: 10 } } } }),
   ]);
@@ -84,9 +113,22 @@ export default async function Risk({ searchParams }: { searchParams: Promise<{ o
       <h1 className="text-2xl font-semibold tracking-tight">Risk & reconciliation</h1>
       <Flash sp={await searchParams} />
       <LedgerCheck last={lastCheck} />
+      <WalletCheck last={lastWalletCheck} />
       <div className="grid gap-6 lg:grid-cols-2">
-        <Section title="Payments needing review" desc="Amount mismatches, or payments that arrived after an order expired. Refund or fulfil manually." count={flagged.length}>
-          {flagged.map((f) => <p key={f.id}>{formatDate(f.createdAt)} · {f.action} · <Link className="text-primary underline" href={`/admin/orders/${f.entityId}`}>order</Link></p>)}
+        <Section title="Extra payments to give back" desc="A second payment on a paid order, or a payment that arrived after the order was cancelled. Return it from the order page." count={issues.extra.length}>
+          {issues.extra.map((p) => <p key={p.id}><Link className="text-primary underline" href={`/admin/orders/${p.orderId}`}>{p.number}</Link> · {formatMoney(p.amountMinor, p.currency)} · order {p.status.toLowerCase().replace("_", " ")}</p>)}
+        </Section>
+        <Section title="Payments that didn't match the order" desc="Not accepted. Check the gateway and refund any money taken." count={issues.mismatched.length}>
+          {issues.mismatched.map((p) => <p key={p.id}><Link className="text-primary underline" href={`/admin/orders/${p.orderId}`}>{p.order.number}</Link> · {p.failureReason}</p>)}
+        </Section>
+        <Section title="Refunds the gateway refused" desc="The order is already marked refunded but the customer hasn't got the money. Retry from the order page." count={issues.failedRefunds.length}>
+          {issues.failedRefunds.map((r) => <p key={r.id}><Link className="text-primary underline" href={`/admin/orders/${r.orderId}`}>{r.order.number}</Link> · {formatMoney(r.amountMinor, r.order.currency)} · {r.failureReason}</p>)}
+        </Section>
+        <Section title="Refunds not confirmed after a day" desc="Check these in the payment gateway dashboard." count={issues.unconfirmedRefunds.length}>
+          {issues.unconfirmedRefunds.map((r) => <p key={r.id}><Link className="text-primary underline" href={`/admin/orders/${r.orderId}`}>{r.order.number}</Link> · {formatMoney(r.amountMinor, r.order.currency)} · {formatDate(r.createdAt)}</p>)}
+        </Section>
+        <Section title="Bank accounts shared by several members" desc="One account receiving withdrawals for more than one member can mean duplicate or fake accounts." count={banks.length}>
+          {banks.map((b) => <p key={b.fingerprint}>{b.bankName} •••• {b.last4} · {b.members} members</p>)}
         </Section>
         <Section title="Unconfirmed payments over an hour old" desc="The reconciliation job re-checks these with Paystack every 10 minutes." count={stalePayments.length}>
           <form action={reconcileNow} className="mb-2"><Button size="sm" variant="outline">Re-check with gateway now</Button></form>

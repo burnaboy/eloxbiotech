@@ -14,9 +14,11 @@ describe("paystack", () => {
   });
 
   it("maps verified transactions to payment events", () => {
-    expect(toEvent({ id: 1, reference: "r", status: "success", amount: 500000, currency: "NGN" }, "e")?.type).toBe("payment.succeeded");
-    expect(toEvent({ id: 1, reference: "r", status: "abandoned", amount: 500000, currency: "NGN" }, "e")?.type).toBe("payment.failed");
-    expect(toEvent({ id: 1, reference: "r", status: "ongoing", amount: 500000, currency: "NGN" }, "e")).toBeNull();
+    expect(toEvent({ id: 1, reference: "r", status: "success", amount: 500000, currency: "NGN" })?.type).toBe("payment.succeeded");
+    expect(toEvent({ id: 1, reference: "r", status: "abandoned", amount: 500000, currency: "NGN" })?.type).toBe("payment.failed");
+    expect(toEvent({ id: 1, reference: "r", status: "ongoing", amount: 500000, currency: "NGN" })).toBeNull();
+    // The event id is per transaction and outcome, so the webhook and the callback check dedupe to one.
+    expect(toEvent({ id: 7, reference: "r", status: "success", amount: 1, currency: "NGN" })?.eventId).toBe("paystack_tx_7_success");
   });
 
   it("formats naira", () => {
@@ -45,7 +47,9 @@ describe("paystack event mapping", () => {
     expect(lost?.type === "dispute.resolved" && lost.merchantLost).toBe(true);
     const won = await parsePaystackEvent({ event: "charge.dispute.resolve", data: { id: 5, resolution: "declined", transaction: { reference: "R2" } } }, verify);
     expect(won?.type === "dispute.resolved" && won.merchantLost).toBe(false);
-    expect((await parsePaystackEvent({ event: "refund.processed", data: { id: 9, transaction_reference: "R3", amount: 100 } }, verify))?.type).toBe("payment.refunded");
+    expect((await parsePaystackEvent({ event: "refund.processed", data: { id: 9, transaction_reference: "R3", amount: 100 } }, verify))?.type).toBe("refund.processed");
+    const failed = await parsePaystackEvent({ event: "refund.failed", data: { id: 9, transaction_reference: "R3", amount: 100 } }, verify);
+    expect(failed?.type === "refund.failed" && failed.refundId).toBe("9");
     expect(await parsePaystackEvent({ event: "transfer.success", data: {} }, verify)).toBeNull();
   });
 });

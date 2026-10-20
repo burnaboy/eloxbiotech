@@ -69,6 +69,8 @@ test("an affiliate sees referral links, the tree and the pending commission", as
   await expect(page.getByText("Chi Demo")).toBeVisible();
   await page.getByLabel("Search members").fill("chi");
   await page.getByRole("button", { name: "Search" }).click();
+  // The search is a plain form, so the page reloads; let it finish loading before clicking a result.
+  await page.waitForLoadState("networkidle");
   await page.getByRole("list", { name: "Search results" }).getByRole("link", { name: /Chi Demo/ }).click();
   await expect(page.getByRole("link", { name: "Back to me" })).toBeVisible();
   // Searching never reveals people outside your own downline.

@@ -1,6 +1,7 @@
 import { unstable_rethrow } from "next/navigation";
 import { ZodError } from "zod";
 import { AppError } from "./errors";
+import { logError } from "./log";
 
 export type ActionState = { error?: string; ok?: string; fieldErrors?: Record<string, string[] | undefined> } | null;
 
@@ -15,7 +16,7 @@ export async function runAction(fn: () => Promise<ActionState | void>): Promise<
       const f = e.flatten();
       return { error: f.formErrors[0] ?? "Please check the highlighted fields.", fieldErrors: f.fieldErrors };
     }
-    console.error(e);
+    logError("action", e);
     return { error: "Something went wrong. Please try again." };
   }
 }

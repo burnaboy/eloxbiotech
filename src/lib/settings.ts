@@ -2,12 +2,25 @@ import { z } from "zod";
 import { prisma, type Tx } from "./db";
 
 /**
- * Compensation plan. Every number here is a placeholder until the business confirms
- * the plan; admins can change them in Admin > Settings without a deploy.
+ * Compensation plan. Every number here is a placeholder until the business approves the plan;
+ * a super admin changes them in Admin > Settings. Each save becomes a new, permanent plan version
+ * (see comp-plan.ts) and orders keep the version that applied when they were paid.
  */
 export const compPlanSchema = z.object({
-  /** Direct (referral) bonus as a percent of the order subtotal, paid to the buyer's sponsor. */
-  directBonusPercent: z.number().min(0).max(100),
+  /** Direct commission rate in basis points (1000 = 10%) of eligible net sales. */
+  directRateBps: z.number().int().min(0).max(10000),
+  /**
+   * Whether an affiliate's own purchases earn their sponsor a direct commission. Off by default:
+   * commissions are for retail sales to customers, not members buying for themselves.
+   */
+  directOnMemberPurchases: z.boolean(),
+  /** Binary (team) matching payouts. Off until the plan's binary rules are explicitly approved. Volume is still tracked. */
+  binaryEnabled: z.boolean(),
+  /**
+   * Only orders from customers (not affiliates buying for themselves) create volume. On by default, so team
+   * pay can only come from genuine retail sales, never from members' own consumption.
+   */
+  binaryRetailOnly: z.boolean(),
   /** PV needed on a leg to make one pairing unit. */
   pairUnitPv: z.number().int().positive(),
   /** "1:1" pairs one left unit with one right unit. "2:1" pairs 2 units on either side with 1 on the other. */
@@ -22,9 +35,12 @@ export const compPlanSchema = z.object({
   maxCarryPv: z.number().int().min(0),
   /** Days after payment before an order earns commissions and volume (refund window). */
   holdDays: z.number().int().min(0).max(90),
-  /** Affiliate must personally sponsor at least one active affiliate on each leg to earn binary. */
+  /**
+   * Affiliate must personally sponsor at least one active affiliate on each leg to earn binary.
+   * Off by default: it makes recruiting a condition of earning, which is a compliance risk.
+   */
   requireDirectOnEachLeg: z.boolean(),
-  /** Personal PV in the affiliate's own purchases needed to be "active". 0 = no requirement. */
+  /** Personal PV needed to qualify for binary: from the affiliate's customers' orders (and own orders if binaryRetailOnly is off). 0 = none. */
   minPersonalPv: z.number().int().min(0),
   /** How new members are placed when the referral link doesn't name a leg. */
   defaultPlacement: z.enum(["WEAKER_LEG", "LEFT", "RIGHT"]),
@@ -34,7 +50,10 @@ export const compPlanSchema = z.object({
 export type CompPlan = z.infer<typeof compPlanSchema>;
 
 export const DEFAULT_COMP_PLAN: CompPlan = {
-  directBonusPercent: 10,
+  directRateBps: 1000,
+  directOnMemberPurchases: false,
+  binaryEnabled: false,
+  binaryRetailOnly: true,
   pairUnitPv: 100,
   pairingRatio: "1:1",
   pairValueMinor: 200000,
@@ -42,7 +61,7 @@ export const DEFAULT_COMP_PLAN: CompPlan = {
   carryForward: true,
   maxCarryPv: 0,
   holdDays: 14,
-  requireDirectOnEachLeg: true,
+  requireDirectOnEachLeg: false,
   minPersonalPv: 0,
   defaultPlacement: "WEAKER_LEG",
   placementMode: "AUTO",
@@ -50,6 +69,13 @@ export const DEFAULT_COMP_PLAN: CompPlan = {
 
 export const shopSettingsSchema = z.object({
   flatShippingMinor: z.number().int().min(0),
+  /// VAT. Off until the business is VAT-registered; Nigeria's standard rate is 7.5% (750 basis points).
+  taxEnabled: z.boolean().default(false),
+  taxRateBps: z.number().int().min(0).max(5000).default(750),
+  taxLabel: z.string().trim().min(1).max(20).default("VAT"),
+  /// Shelf prices already include VAT (usual for Nigerian retail). If false, VAT is added at checkout.
+  pricesIncludeTax: z.boolean().default(true),
+  taxShipping: z.boolean().default(true),
   /// Added per started kilogram of parcel weight, on top of the flat rate. 0 = flat rate only.
   perKgShippingMinor: z.number().int().min(0).default(0),
   freeShippingOverMinor: z.number().int().min(0),
@@ -62,6 +88,11 @@ export type ShopSettings = z.infer<typeof shopSettingsSchema>;
 export const DEFAULT_SHOP: ShopSettings = {
   flatShippingMinor: 250000,
   perKgShippingMinor: 0,
+  taxEnabled: false,
+  taxRateBps: 750,
+  taxLabel: "VAT",
+  pricesIncludeTax: true,
+  taxShipping: true,
   freeShippingOverMinor: 5000000,
   minPayoutMinor: 500000,
   orderExpiryMinutes: 60,
@@ -117,9 +148,17 @@ export async function getBrand(tx: Tx = prisma): Promise<Brand> {
   return brandSchema.parse({ ...DEFAULT_BRAND, ...((row?.value as object) ?? {}) });
 }
 
+/** Reads a stored plan, upgrading older shapes (percent rate) to the current one. */
+export function parseCompPlan(value: unknown): CompPlan {
+  const v = { ...((value as Record<string, unknown>) ?? {}) };
+  if (typeof v.directBonusPercent === "number" && v.directRateBps === undefined) v.directRateBps = Math.round(v.directBonusPercent * 100);
+  delete v.directBonusPercent;
+  return compPlanSchema.parse({ ...DEFAULT_COMP_PLAN, ...v });
+}
+
 export async function getCompPlan(tx: Tx = prisma): Promise<CompPlan> {
   const row = await tx.setting.findUnique({ where: { key: "compPlan" } });
-  return compPlanSchema.parse({ ...DEFAULT_COMP_PLAN, ...((row?.value as object) ?? {}) });
+  return parseCompPlan(row?.value);
 }
 
 export async function getShopSettings(tx: Tx = prisma): Promise<ShopSettings> {

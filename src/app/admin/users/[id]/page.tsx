@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ConfirmAction } from "@/components/admin/high-risk";
 import { notFound } from "next/navigation";
 import { requireAdmin, canAccess } from "@/lib/session";
 import { prisma } from "@/lib/db";
@@ -83,9 +84,9 @@ export default async function Member({ params, searchParams }: { params: Promise
           <CardHeader><CardTitle>Account actions</CardTitle></CardHeader>
           <CardContent className="flex flex-wrap gap-2">
             {u.status === "ACTIVE"
-              ? <form action={setUserStatusAction.bind(null, u.id, "SUSPENDED")}><Button variant="destructive">Suspend</Button></form>
-              : <form action={setUserStatusAction.bind(null, u.id, "ACTIVE")}><Button>Reactivate</Button></form>}
-            <form action={revokeSessionsAction.bind(null, u.id)}><Button variant="outline">Sign out everywhere</Button></form>
+              ? <ConfirmAction id="suspend" action={setUserStatusAction.bind(null, u.id, "SUSPENDED")} label="Suspend" confirm="SUSPEND" variant="destructive" description="They are signed out at once and can't sign in or earn on new orders." />
+              : <ConfirmAction id="reactivate" action={setUserStatusAction.bind(null, u.id, "ACTIVE")} label="Reactivate" variant="default" />}
+            <ConfirmAction id="signout" action={revokeSessionsAction.bind(null, u.id)} label="Sign out everywhere" />
             <p className="w-full text-xs text-muted-foreground">Suspended members can't sign in and earn nothing on new orders. Admin roles are managed by a super administrator under Admin team.</p>
           </CardContent>
         </Card>

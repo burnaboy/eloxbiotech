@@ -1,5 +1,6 @@
 "use server";
 
+import { rateLimit } from "@/lib/rate-limit";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
@@ -12,6 +13,7 @@ import { requestPasswordReset, resetPassword } from "@/lib/password-reset";
 import { sendVerificationEmail } from "@/lib/email-verification";
 import { registerUser, type RegisterInput } from "@/lib/users";
 import { runAction, type ActionState } from "@/lib/action";
+import { logError } from "@/lib/log";
 
 function safeNext(next: unknown) {
   return typeof next === "string" && next.startsWith("/") && !next.startsWith("//") ? next : "/";
@@ -52,9 +54,11 @@ export async function verifyCodeAction(input: { code: string; next?: string }): 
 
 export async function registerAction(input: RegisterInput): Promise<ActionState> {
   const res = await runAction(async () => {
-    const user = await registerUser(input, { ip: await clientIp() });
+    const ip = await clientIp();
+    await rateLimit("register", ip);
+    const user = await registerUser(input, { ip });
     await startSession(user.id);
-    await sendVerificationEmail(user.id).catch((e) => console.error("verification email failed", e));
+    await sendVerificationEmail(user.id).catch((e) => logError("verification email", e));
     (await cookies()).delete("ref");
   });
   if (res) return res;

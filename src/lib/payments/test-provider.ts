@@ -17,16 +17,16 @@ export function signTestPayload(body: string) {
   return createHmac("sha256", secret()).update(body).digest("hex");
 }
 
-export function buildTestEvent(e: DistributiveOmit<PaymentEvent, "eventId">) {
-  const body = JSON.stringify({ ...e, eventId: `evt_${randomBytes(8).toString("hex")}` });
+export function buildTestEvent(e: DistributiveOmit<PaymentEvent, "eventId"> & { eventId?: string }) {
+  const body = JSON.stringify({ eventId: `evt_${randomBytes(8).toString("hex")}`, ...e });
   return { body, signature: signTestPayload(body) };
 }
 
 export const testProvider: PaymentProvider = {
   name: "test",
+  currencies: ["NGN", "GHS", "ZAR", "KES", "USD"],
   async createCheckout(req) {
-    const providerRef = `test_${randomBytes(10).toString("hex")}`;
-    return { providerRef, redirectUrl: `/pay/test/${providerRef}` };
+    return { redirectUrl: `/pay/test/${encodeURIComponent(req.reference)}` };
   },
   async parseWebhook(rawBody, headers) {
     const sig = headers.get("x-test-signature") ?? "";
@@ -34,10 +34,9 @@ export const testProvider: PaymentProvider = {
     const a = Buffer.from(sig, "hex");
     const b = Buffer.from(expected, "hex");
     if (a.length !== b.length || !timingSafeEqual(a, b)) throw new Error("Invalid signature");
-    const e = JSON.parse(rawBody) as PaymentEvent;
-    return e;
+    return JSON.parse(rawBody) as PaymentEvent;
   },
   async refund() {
-    /* nothing to call for the simulator */
+    return { refundId: `test_refund_${randomBytes(8).toString("hex")}`, status: "processed" };
   },
 };

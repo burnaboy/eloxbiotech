@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getProvider } from "@/lib/payments";
-import { applyPaymentEvent } from "@/lib/orders";
+import { applyPaymentEvent } from "@/lib/payments/service";
+import { logError } from "@/lib/log";
 
 /**
  * Payment gateway webhooks, e.g. POST /api/webhooks/paystack.
@@ -23,10 +24,22 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ pro
   } catch (e) {
     const msg = e instanceof Error ? e.message : "";
     if (msg === "Invalid signature") return NextResponse.json({ error: "invalid signature" }, { status: 401 });
-    console.error("webhook parse failed", e);
+    logError("webhook parse", e);
     return NextResponse.json({ error: "temporary failure" }, { status: 500 }); // gateway will retry
   }
   if (!event) return NextResponse.json({ ok: true, ignored: true });
-  const result = await applyPaymentEvent(provider.name, event);
-  return NextResponse.json({ ok: true, result: result.status });
+  let payload: unknown = null;
+  try {
+    payload = JSON.parse(raw);
+  } catch {
+    /* the provider already parsed it; keep the normalised event only */
+  }
+  try {
+    const result = await applyPaymentEvent(provider.name, event, "webhook", payload ?? event);
+    return NextResponse.json({ ok: true, result: result.status });
+  } catch (e) {
+    // Nothing was saved (the transaction rolled back), so the gateway's retry will be processed normally.
+    logError("webhook processing", e);
+    return NextResponse.json({ error: "temporary failure" }, { status: 500 });
+  }
 }

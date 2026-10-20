@@ -5,17 +5,23 @@ import { formatMoney } from "@/lib/money";
 import { formatDate } from "@/lib/utils";
 import { Badge, StatusBadge } from "@/components/ui/badge";
 import { Empty, TBody, THead, Table, Td, Th } from "@/components/ui/table";
+import { Pager } from "@/components/admin/pager";
+import { pageOf } from "@/lib/admin-filters";
+
+const PAGE = 50;
 
 export const metadata = { title: "Attributed sales" };
 
-export default async function SalesPage() {
+export default async function SalesPage({ searchParams }: { searchParams: Promise<{ page?: string }> }) {
+  const page = pageOf((await searchParams).page);
   const user = await requireAffiliate();
   const [orders, brand] = await Promise.all([
     prisma.order.findMany({
       where: { referrerId: user.id, status: { not: "PENDING_PAYMENT" } },
       include: { user: { select: { name: true } }, commissions: { where: { userId: user.id, type: "DIRECT" } } },
       orderBy: { createdAt: "desc" },
-      take: 200,
+      skip: (page - 1) * PAGE,
+      take: PAGE + 1,
     }),
     getBrand(),
   ]);
@@ -28,7 +34,7 @@ export default async function SalesPage() {
         <Table>
           <THead><tr><Th>Date</Th><Th>Order</Th><Th>Buyer</Th><Th>Status</Th><Th className="text-right">Subtotal</Th><Th className="text-right">PV</Th><Th>Your commission</Th></tr></THead>
           <TBody>
-            {orders.map((o) => {
+            {orders.slice(0, PAGE).map((o) => {
               const c = o.commissions[0];
               return (
                 <tr key={o.id}>
@@ -45,6 +51,7 @@ export default async function SalesPage() {
           </TBody>
         </Table>
       )}
+      <Pager page={page} hasMore={orders.length > PAGE} params={{}} />
     </>
   );
 }

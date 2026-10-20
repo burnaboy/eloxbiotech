@@ -1,5 +1,6 @@
 "use server";
 
+import { rateLimit } from "@/lib/rate-limit";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
@@ -28,6 +29,7 @@ export async function updateProfileAction(fd: FormData) {
 export async function changePasswordAction(fd: FormData) {
   const user = await requireUser("/account");
   const res = await runAction(async () => {
+    await rateLimit("passwordChange", user.id);
     const next = registerSchema.shape.password.parse(str(fd, "newPassword"));
     if (next !== str(fd, "confirm")) throw new AppError("New passwords don't match.");
     if (!(await verifyPassword(str(fd, "current"), user.passwordHash))) throw new AppError("Current password is incorrect.");
@@ -66,6 +68,7 @@ export async function confirmMfaAction(code: string): Promise<ActionState & { re
   const user = await requireUser("/account/security");
   let recovery: string[] = [];
   const res = await runAction(async () => {
+    await rateLimit("mfaManage", user.id);
     recovery = await confirmEnrolment(user.id, code);
   });
   return res ?? { ok: "Two-step verification is on.", recovery };
@@ -75,6 +78,7 @@ export async function disableMfaAction(fd: FormData) {
   const user = await requireUser("/account/security");
   const res = await runAction(async () => {
     if (mfaRequired(user.role)) throw new AppError("Two-step verification is required for administrators.");
+    await rateLimit("mfaManage", user.id);
     if (!(await checkSecondFactor(user.id, str(fd, "code")))) throw new AppError("That code isn't valid.");
     await prisma.user.update({ where: { id: user.id }, data: { mfaSecretEnc: null, mfaEnabledAt: null, mfaLastStep: null, mfaRecoveryHashes: [] } });
     await audit("mfa.disable", "User", user.id, user.id);

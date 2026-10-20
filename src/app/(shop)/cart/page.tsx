@@ -10,12 +10,17 @@ import { Alert } from "@/components/ui/alert";
 import { ProductImage } from "@/components/product-card";
 import { CartQuantity } from "@/components/cart-line";
 import { Price } from "@/components/price";
+import { Input } from "@/components/ui/input";
+import { cartCode } from "@/lib/cart-code";
+import { applyDiscountAction, removeDiscountAction } from "../actions";
 
 export const metadata = { title: "Cart" };
 
 export default async function CartPage() {
   const user = await requireUser("/cart");
-  const [cart, brand] = await Promise.all([getCart(user.id), getBrand()]);
+  const code = await cartCode();
+  const [cart, brand] = await Promise.all([getCart(user.id, code), getBrand()]);
+  const m = (v: number) => formatMoney(v, brand.currency);
   const short = cart.items.filter((i) => i.problem);
   return (
     <div className="container py-10">
@@ -42,9 +47,24 @@ export default async function CartPage() {
           <Card className="h-fit">
             <CardHeader><CardTitle>Summary</CardTitle></CardHeader>
             <CardContent className="space-y-3 text-sm">
-              <Row label="Subtotal" value={formatMoney(cart.subtotalMinor, brand.currency)} />
-              <Row label="Shipping" value={cart.shippingMinor ? formatMoney(cart.shippingMinor, brand.currency) : "Free"} />
-              <div className="border-t pt-3"><Row label="Total" value={formatMoney(cart.totalMinor, brand.currency)} bold /></div>
+              <Row label="Subtotal" value={m(cart.subtotalMinor)} />
+              {cart.discountMinor > 0 && <Row label={`Discount (${cart.discountCode})`} value={`−${m(cart.discountMinor)}`} />}
+              <Row label="Delivery" value={cart.shippingMinor ? m(cart.shippingMinor) : "Free"} />
+              {cart.taxMinor > 0 && !cart.taxIncluded && <Row label={cart.taxLabel} value={m(cart.taxMinor)} />}
+              <div className="border-t pt-3"><Row label="Total" value={m(cart.totalMinor)} bold /></div>
+              {cart.taxMinor > 0 && cart.taxIncluded && <p className="text-xs text-muted-foreground">Includes {cart.taxLabel} of {m(cart.taxMinor)}</p>}
+              {cart.discountCode ? (
+                <form action={removeDiscountAction} className="flex items-center justify-between gap-2 text-xs">
+                  <span>{cart.discountDescription}</span>
+                  <Button variant="ghost" size="sm">Remove code</Button>
+                </form>
+              ) : (
+                <form action={applyDiscountAction} className="flex gap-2">
+                  <Input name="code" aria-label="Discount code" placeholder="Discount code" defaultValue={code ?? ""} maxLength={40} autoCapitalize="characters" />
+                  <Button variant="outline">Apply</Button>
+                </form>
+              )}
+              {cart.discountError && <p className="text-xs text-destructive">{cart.discountError}</p>}
               {short.length > 0 && <Alert tone="error">Some items are no longer available in that quantity. Adjust them to continue.</Alert>}
               <Button asChild className="w-full" size="lg" disabled={short.length > 0}>
                 {short.length > 0 ? <span>Checkout</span> : <Link href="/checkout">Checkout</Link>}

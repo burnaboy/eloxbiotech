@@ -11,13 +11,15 @@ import { StatusBadge } from "@/components/ui/badge";
 import Link from "next/link";
 import { Check } from "lucide-react";
 import { formatDate } from "@/lib/utils";
+import { EVER_PAID, LIVE_PAID } from "@/lib/order-state";
 
 export const metadata = { title: "Order" };
 
-function Timeline({ order }: { order: { createdAt: Date; paidAt: Date | null; shippedAt: Date | null; deliveredAt: Date | null; status: string; carrier: string | null; trackingRef: string | null } }) {
+function Timeline({ order }: { order: { createdAt: Date; paidAt: Date | null; processingAt: Date | null; shippedAt: Date | null; deliveredAt: Date | null; status: string; carrier: string | null; trackingRef: string | null } }) {
   const steps = [
     { label: "Order placed", at: order.createdAt },
     { label: "Payment confirmed", at: order.paidAt },
+    { label: "Being prepared", at: order.processingAt },
     { label: `Shipped${order.carrier ? ` with ${order.carrier}` : ""}${order.trackingRef ? ` · tracking ${order.trackingRef}` : ""}`, at: order.shippedAt },
     { label: "Delivered", at: order.deliveredAt },
   ];
@@ -48,7 +50,8 @@ export default async function OrderPage({ params, searchParams }: { params: Prom
       <h1 className="text-3xl font-semibold tracking-tight">Order {order.number}</h1>
       {sp.error && <Alert tone="error">{sp.error}</Alert>}
       {sp.ok && <Alert tone="success">{sp.ok}</Alert>}
-      {order.status === "PAID" && sp.paid && <Alert tone="success">Payment received. Thank you! We'll let you know when it ships.</Alert>}
+      {order.status === "PAID" && sp.paid === "1" && <Alert tone="success">Payment received. Thank you! We'll let you know when it ships.</Alert>}
+      {sp.paid === "failed" && order.status === "PENDING_PAYMENT" && <Alert tone="error">The payment didn't go through. You can try again below.</Alert>}
       {sp.paid === "pending" && order.status === "PENDING_PAYMENT" && <Alert>We're waiting for confirmation from the payment provider. This page will update once it arrives.</Alert>}
       {pending && (
         <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-card p-4">
@@ -58,7 +61,7 @@ export default async function OrderPage({ params, searchParams }: { params: Prom
         </div>
       )}
       <OrderSummary order={order} showPv={user.role !== "CUSTOMER"} />
-      {["PAID", "SHIPPED", "DELIVERED", "REFUNDED"].includes(order.status) && (
+      {EVER_PAID.includes(order.status) && (
         <div className="grid gap-6 lg:grid-cols-2">
           <Card>
             <CardHeader className="flex-row items-center justify-between">
@@ -77,7 +80,7 @@ export default async function OrderPage({ params, searchParams }: { params: Prom
                   {r.adminNote && <p className="mt-1">Response: {r.adminNote}</p>}
                 </div>
               ))}
-              {["PAID", "SHIPPED", "DELIVERED"].includes(order.status) && !order.returns.some((r) => ["REQUESTED", "APPROVED"].includes(r.status)) && (
+              {LIVE_PAID.includes(order.status) && !order.returns.some((r) => ["REQUESTED", "APPROVED"].includes(r.status)) && (
                 <form action={requestReturnAction.bind(null, order.id)} className="space-y-2">
                   <label htmlFor="reason" className="font-medium">Request a return or refund</label>
                   <Textarea id="reason" name="reason" required minLength={10} rows={3} placeholder="What went wrong?" />

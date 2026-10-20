@@ -9,31 +9,37 @@ import { Input, Select } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Empty, TBody, THead, Table, Td, Th } from "@/components/ui/table";
 import { Pager } from "@/components/admin/pager";
+import { FilterBar } from "@/components/admin/filter-bar";
+import { dateWhere, pageOf, parseRange, searchText } from "@/lib/admin-filters";
 
-const STATUSES: OrderStatus[] = ["PENDING_PAYMENT", "PAID", "SHIPPED", "DELIVERED", "CANCELLED", "REFUNDED"];
+const STATUSES: OrderStatus[] = ["PENDING_PAYMENT", "PAID", "PROCESSING", "SHIPPED", "DELIVERED", "PARTIALLY_REFUNDED", "CANCELLED", "REFUNDED"];
 const PAGE = 50;
 
-export default async function AdminOrders({ searchParams }: { searchParams: Promise<{ status?: string; q?: string; page?: string }> }) {
+export default async function AdminOrders({ searchParams }: { searchParams: Promise<{ status?: string; q?: string; page?: string; from?: string; to?: string }> }) {
   await requireAdmin("ORDERS");
   const sp = await searchParams;
-  const page = Math.max(1, Number(sp.page) || 1);
+  const page = pageOf(sp.page);
+  const q = searchText(sp.q);
+  const created = dateWhere(parseRange(sp.from, sp.to));
   const where: Prisma.OrderWhereInput = {
+    ...(created ? { createdAt: created } : {}),
     ...(STATUSES.includes(sp.status as OrderStatus) ? { status: sp.status as OrderStatus } : {}),
-    ...(sp.q ? { OR: [{ number: { contains: sp.q, mode: "insensitive" } }, { user: { email: { contains: sp.q, mode: "insensitive" } } }, { shipName: { contains: sp.q, mode: "insensitive" } }] } : {}),
+    ...(q ? { OR: [{ number: { contains: q, mode: "insensitive" } }, { user: { email: { contains: q, mode: "insensitive" } } }, { shipName: { contains: q, mode: "insensitive" } }] } : {}),
   };
   const orders = await prisma.order.findMany({ where, include: { user: { select: { name: true, email: true } } }, orderBy: { createdAt: "desc" }, skip: (page - 1) * PAGE, take: PAGE + 1 });
   return (
     <>
       <h1 className="text-2xl font-semibold tracking-tight">Orders</h1>
-      <form className="flex flex-wrap gap-2">
-        <Input name="q" defaultValue={sp.q} placeholder="Order number, email or name" className="max-w-xs" aria-label="Search orders" />
-        <Select name="status" defaultValue={sp.status ?? ""} className="max-w-48" aria-label="Status">
-          <option value="">All statuses</option>
-          {STATUSES.map((s) => <option key={s} value={s}>{s.replace("_", " ").toLowerCase()}</option>)}
-        </Select>
-        <Button variant="outline">Filter</Button>
-      </form>
-      {orders.length === 0 ? <Empty>No orders.</Empty> : (
+      <FilterBar sp={sp} search={{ placeholder: "Order number, email or name" }} exportReport="orders">
+        <div className="space-y-1">
+          <label htmlFor="status" className="block text-xs font-medium text-muted-foreground">Status</label>
+          <Select id="status" name="status" defaultValue={sp.status ?? ""} className="w-48">
+            <option value="">All statuses</option>
+            {STATUSES.map((s) => <option key={s} value={s}>{s.replace("_", " ").toLowerCase()}</option>)}
+          </Select>
+        </div>
+      </FilterBar>
+      {orders.length === 0 ? <Empty>No orders match these filters.</Empty> : (
         <Table>
           <THead><tr><Th>Order</Th><Th>Customer</Th><Th>Date</Th><Th>Status</Th><Th className="text-right">Total</Th></tr></THead>
           <TBody>
@@ -49,7 +55,7 @@ export default async function AdminOrders({ searchParams }: { searchParams: Prom
           </TBody>
         </Table>
       )}
-      <Pager page={page} hasMore={orders.length > PAGE} params={{ status: sp.status, q: sp.q }} />
+      <Pager page={page} hasMore={orders.length > PAGE} params={{ status: sp.status, q: sp.q, from: sp.from, to: sp.to }} />
     </>
   );
 }

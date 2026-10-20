@@ -1,3 +1,5 @@
+import { randomBytes } from "node:crypto";
+import { ConfirmAction, ReasonFields } from "@/components/admin/high-risk";
 import Link from "next/link";
 import type { CommissionStatus, CommissionType, Prisma } from "@prisma/client";
 import { requireAdmin } from "@/lib/session";
@@ -16,7 +18,7 @@ import { Flash } from "@/components/flash";
 import { Pager } from "@/components/admin/pager";
 import { adjustmentAction, holdCommissionAction, matureNowAction, runBinaryAction } from "../actions";
 
-const STATUSES: CommissionStatus[] = ["PENDING", "HELD", "APPROVED", "REVERSED", "PAID"];
+const STATUSES: CommissionStatus[] = ["PENDING", "HELD", "APPROVED", "REVERSED"];
 const TYPES: CommissionType[] = ["DIRECT", "BINARY", "ADJUSTMENT"];
 const PAGE = 50;
 
@@ -55,8 +57,9 @@ export default async function AdminCommissions({ searchParams }: { searchParams:
         <Card>
           <CardHeader><CardTitle>Binary run</CardTitle><CardDescription>Runs daily on its own. Each day can only be paid once. Needs a fresh authenticator code.</CardDescription></CardHeader>
           <CardContent>
-            <form action={runBinaryAction} className="flex gap-2">
+            <form action={runBinaryAction} className="space-y-2">
               <Input type="date" name="period" defaultValue={yesterday} aria-label="Period" className="max-w-44" />
+              <ReasonFields idPrefix="binary" confirm="RUN" />
               <Button>Run</Button>
             </form>
           </CardContent>
@@ -67,8 +70,9 @@ export default async function AdminCommissions({ searchParams }: { searchParams:
             <form action={adjustmentAction} className="space-y-2">
               <Input name="email" type="email" placeholder="Member email" aria-label="Member email" required />
               <Input name="amount" inputMode="decimal" placeholder="Amount, e.g. -1500" aria-label="Amount" required />
-              <Input name="note" placeholder="Reason" aria-label="Reason" required />
-              <Button variant="outline">Record</Button>
+              <Input name="note" placeholder="Reason (kept permanently, shown to the member)" aria-label="Reason" required minLength={10} />
+              <input type="hidden" name="formKey" value={randomBytes(18).toString("base64url")} />
+              <Button variant="outline">Post correction</Button>
             </form>
           </CardContent>
         </Card>
@@ -100,9 +104,9 @@ export default async function AdminCommissions({ searchParams }: { searchParams:
                 <Td className="text-right tabular-nums">{m(c.amountMinor)}</Td>
                 <Td>
                   {["PENDING", "APPROVED"].includes(c.status) && c.amountMinor > 0 && c.paidMinor === 0 && (
-                    <form action={holdCommissionAction.bind(null, c.id, true)} className="flex gap-1"><Input name="reason" placeholder="Reason" className="h-8 w-28" aria-label="Hold reason" /><Button size="sm" variant="outline">Hold</Button></form>
+                    <ConfirmAction id={`hold-${c.id}`} action={holdCommissionAction.bind(null, c.id, true)} label="Hold" size="sm" />
                   )}
-                  {c.status === "HELD" && <form action={holdCommissionAction.bind(null, c.id, false)}><Button size="sm" variant="outline">Release</Button></form>}
+                  {c.status === "HELD" && <ConfirmAction id={`release-${c.id}`} action={holdCommissionAction.bind(null, c.id, false)} label="Release" size="sm" />}
                 </Td>
               </tr>
             ))}

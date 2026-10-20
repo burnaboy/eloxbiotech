@@ -3,6 +3,8 @@ import { formatMoney } from "@/lib/money";
 import { formatDate } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatusBadge } from "@/components/ui/badge";
+import { OrderTotals } from "@/components/order-totals";
+import { STATUS_LABEL } from "@/lib/order-state";
 
 export function OrderSummary({ order, showPv = false }: { order: Order & { items: OrderItem[] }; showPv?: boolean }) {
   const m = (v: number) => formatMoney(v, order.currency);
@@ -11,20 +13,19 @@ export function OrderSummary({ order, showPv = false }: { order: Order & { items
       <Card>
         <CardHeader className="flex-row items-center justify-between">
           <CardTitle>Items</CardTitle>
-          <StatusBadge status={order.status} />
+          <StatusBadge status={order.status} label={STATUS_LABEL[order.status]} />
         </CardHeader>
         <CardContent className="space-y-3 text-sm">
           {order.items.map((i) => (
             <div key={i.id} className="flex justify-between gap-2">
-              <span>{i.name}{i.variantName ? ` (${i.variantName})` : ""} <span className="text-muted-foreground">× {i.quantity}{showPv ? ` · ${i.pv * i.quantity} PV` : ""}</span></span>
+              <span>
+                {i.name}{i.variantName ? ` (${i.variantName})` : ""} <span className="text-muted-foreground">× {i.quantity}{showPv ? ` · ${i.pv * i.quantity} PV` : ""}</span>
+                {i.refundedQty > 0 && <span className="block text-xs text-destructive">{i.refundedQty} refunded</span>}
+              </span>
               <span className="tabular-nums">{m(i.unitPriceMinor * i.quantity)}</span>
             </div>
           ))}
-          <div className="space-y-1 border-t pt-3">
-            <div className="flex justify-between"><span>Subtotal</span><span>{m(order.subtotalMinor)}</span></div>
-            <div className="flex justify-between"><span>Shipping</span><span>{order.shippingMinor ? m(order.shippingMinor) : "Free"}</span></div>
-            <div className="flex justify-between text-base font-semibold"><span>Total</span><span>{m(order.totalMinor)}</span></div>
-          </div>
+          <div className="border-t pt-3"><OrderTotals order={order} /></div>
         </CardContent>
       </Card>
       <Card className="h-fit">

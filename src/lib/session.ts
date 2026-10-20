@@ -66,9 +66,15 @@ export async function markStepUp() {
   if (s) await prisma.session.update({ where: { id: s.id }, data: { mfaVerifiedAt: new Date(), mfaPending: false } });
 }
 
+/**
+ * The caller's IP for rate limits and audit. X-Forwarded-For can be forged by the client, so only the entry
+ * added by our own proxy is trusted: TRUSTED_PROXY_HOPS proxies (default 1) append to the right of the list.
+ */
 export async function clientIp() {
   const h = await headers();
-  return h.get("x-forwarded-for")?.split(",")[0]?.trim() || h.get("x-real-ip") || "unknown";
+  const hops = Math.max(1, Number(process.env.TRUSTED_PROXY_HOPS) || 1);
+  const list = (h.get("x-forwarded-for") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  return list[list.length - hops] || h.get("x-real-ip") || "unknown";
 }
 
 /** Always issues a brand-new token (and drops any existing one), so a planted cookie can't be reused: no session fixation. */

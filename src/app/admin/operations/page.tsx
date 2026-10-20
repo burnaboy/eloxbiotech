@@ -1,4 +1,5 @@
 import { requireSuperAdmin } from "@/lib/session";
+import { ReasonFields } from "@/components/admin/high-risk";
 import { prisma } from "@/lib/db";
 import { getOps } from "@/lib/settings";
 import { formatDate } from "@/lib/utils";
@@ -23,6 +24,7 @@ export default async function Operations({ searchParams }: { searchParams: Promi
             <label className="flex items-center gap-2"><input type="checkbox" name="payoutsPaused" defaultChecked={ops.payoutsPaused} className="h-4 w-4" /> Pause payout requests and payments</label>
             <label className="flex items-center gap-2"><input type="checkbox" name="commissionsPaused" defaultChecked={ops.commissionsPaused} className="h-4 w-4" /> Pause commission approval and binary runs</label>
             <div className="space-y-1"><label htmlFor="notice">Site-wide notice (optional)</label><Input id="notice" name="notice" defaultValue={ops.notice} placeholder="e.g. Checkout is paused for maintenance until 3pm." /></div>
+            <div className="max-w-md"><ReasonFields idPrefix="ops" /></div>
             <Button>Save</Button>
           </form>
         </CardContent>
@@ -33,7 +35,7 @@ export default async function Operations({ searchParams }: { searchParams: Promi
           <CardContent>
             <form action={resetMfaAction} className="space-y-2">
               <Input name="email" type="email" placeholder="Member email" aria-label="Member email" required />
-              <Input name="confirm" placeholder="Type RESET" aria-label="Confirmation" required />
+              <ReasonFields idPrefix="mfa" confirm="RESET" reasonLabel="How you confirmed their identity" />
               <Button variant="destructive">Reset</Button>
             </form>
           </CardContent>
@@ -42,7 +44,7 @@ export default async function Operations({ searchParams }: { searchParams: Promi
           <CardHeader><CardTitle>Sign everyone out</CardTitle><CardDescription>For a suspected breach. Everyone except you must sign in again.</CardDescription></CardHeader>
           <CardContent>
             <form action={revokeAllSessionsAction} className="space-y-2">
-              <Input name="confirm" placeholder="Type SIGN OUT EVERYONE" aria-label="Confirmation" required />
+              <ReasonFields idPrefix="signout" confirm="SIGN OUT EVERYONE" />
               <Button variant="destructive">Sign everyone out</Button>
             </form>
           </CardContent>

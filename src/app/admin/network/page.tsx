@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ReasonFields } from "@/components/admin/high-risk";
 import { requireAdmin } from "@/lib/session";
 import { prisma } from "@/lib/db";
 import { loadSubtree, searchMembers } from "@/lib/tree-view";
@@ -80,7 +81,7 @@ export default async function Network({ searchParams }: { searchParams: Promise<
                             ))}
                           </Select>
                         </div>
-                        <Input name="note" placeholder="Note (optional)" aria-label="Note" className="max-w-48" maxLength={300} />
+                        <div className="w-full max-w-md"><ReasonFields idPrefix={`place-${u.id}`} confirm="PLACE" reasonLabel="Why this position (kept in the audit log; placement can't be undone)" /></div>
                         <Button disabled={slots.length === 0}>Place</Button>
                       </form>
                     </li>

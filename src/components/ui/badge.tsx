@@ -19,11 +19,11 @@ export function Badge({ className, tone, ...p }: React.HTMLAttributes<HTMLSpanEl
 }
 
 const STATUS_TONE: Record<string, VariantProps<typeof badge>["tone"]> = {
-  PENDING_PAYMENT: "warning", PAID: "primary", SHIPPED: "primary", DELIVERED: "success", CANCELLED: "neutral", REFUNDED: "danger",
+  PENDING_PAYMENT: "warning", PAID: "primary", PROCESSING: "primary", SHIPPED: "primary", PARTIALLY_REFUNDED: "warning", FAILED: "danger", PROCESSED: "success", SUCCEEDED: "success", DELIVERED: "success", CANCELLED: "neutral", REFUNDED: "danger",
   REQUESTED: "warning", APPROVED: "success", REJECTED: "danger", REVERSED: "danger", PENDING: "warning", HELD: "danger",
   OPEN: "warning", ANSWERED: "primary", CLOSED: "neutral",
   ACTIVE: "success", SUSPENDED: "danger",
 };
-export function StatusBadge({ status }: { status: string }) {
-  return <Badge tone={STATUS_TONE[status] ?? "neutral"}>{status.replace(/_/g, " ").toLowerCase()}</Badge>;
+export function StatusBadge({ status, label }: { status: string; label?: string }) {
+  return <Badge tone={STATUS_TONE[status] ?? "neutral"}>{label ?? status.replace(/_/g, " ").toLowerCase()}</Badge>;
 }

@@ -29,7 +29,7 @@ export function RegisterForm({ referralCode, leg, sponsorName }: { referralCode?
   const [error, setError] = useState<string>();
   const { register, handleSubmit, watch, formState } = useForm<z.infer<typeof schema>>({
     resolver: zodResolver(schema),
-    defaultValues: { referralCode: referralCode ?? "", leg: (leg as "LEFT" | "RIGHT") ?? "", joinAsAffiliate: !!referralCode },
+    defaultValues: { referralCode: referralCode ?? "", leg: (leg as "LEFT" | "RIGHT") ?? "", joinAsAffiliate: false },
   });
   const e = formState.errors;
   const affiliate = watch("joinAsAffiliate");

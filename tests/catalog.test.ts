@@ -5,7 +5,8 @@ import path from "node:path";
 import sharp from "sharp";
 import { prisma } from "@/lib/db";
 import { address, buyAndPay, customer, makeRoot, product, resetDb, setPlan } from "./helpers";
-import { addToCart, cancelPendingOrder, createOrderFromCart, getCart, refundOrder, shippingFor, updateFulfilment } from "@/lib/orders";
+import { addToCart, cancelPendingOrder, createOrderFromCart, getCart, shippingFor, updateFulfilment } from "@/lib/orders";
+import { refundOrder } from "@/lib/refunds";
 import { lowestPrice, parseAttributes, refreshListPrice, unitPrice } from "@/lib/catalog";
 import { adjustStock, receiveReturnedItems } from "@/lib/inventory";
 import { formatMoney, signedMinor, toMinor } from "@/lib/money";
@@ -150,12 +151,12 @@ describe("inventory", () => {
     const p = await product({ stock: 10 });
 
     const unshipped = await buyAndPay(c.id, p.id, 2);
-    await refundOrder(unshipped.id, root.id);
+    await refundOrder(unshipped.id, root.id, { reason: "test" });
     expect((await prisma.product.findUniqueOrThrow({ where: { id: p.id } })).stock).toBe(10);
 
     const shipped = await buyAndPay(c.id, p.id, 3);
     await updateFulfilment(shipped.id, "SHIPPED", root.id);
-    await refundOrder(shipped.id, root.id);
+    await refundOrder(shipped.id, root.id, { reason: "test" });
     expect((await prisma.product.findUniqueOrThrow({ where: { id: p.id } })).stock).toBe(7);
 
     const item = await prisma.orderItem.findFirstOrThrow({ where: { orderId: shipped.id } });

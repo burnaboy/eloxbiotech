@@ -23,6 +23,10 @@ export default async function Terms() {
         <li>You must not create accounts for other people, manipulate placement, or place orders with stolen payment details. We may hold or reverse commissions while we investigate suspected abuse, and close accounts that break these terms.</li>
         <li>You are responsible for your own taxes on commissions.</li>
       </ul>
+      <h2>Your consumer rights</h2>
+      <p>Nothing in these terms limits your rights under the Federal Competition and Consumer Protection Act 2018 or other Nigerian law. If you have a problem, see our <a href="/legal/complaints">complaints process</a>.</p>
+      <h2>Leaving the affiliate programme</h2>
+      <p>You can stop being an affiliate at any time by contacting us. There is nothing to pay and nothing to return. Commissions already approved remain yours and can still be withdrawn. We never charge recurring fees.</p>
       <h2>5. Changes</h2>
       <p>We may update these terms or the compensation plan. Changes apply from the date published and never take away commissions already approved.</p>
       <h2>6. Contact</h2>

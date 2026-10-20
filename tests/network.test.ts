@@ -3,7 +3,7 @@ import { prisma } from "@/lib/db";
 import { affiliate, buyAndPay, customer, later, makeRoot, node, product, resetDb, setPlan } from "./helpers";
 import { placeInTree } from "@/lib/tree";
 import { matureOrders, runBinary } from "@/lib/commissions";
-import { refundOrder } from "@/lib/orders";
+import { refundOrder } from "@/lib/refunds";
 import { reconcileVolume, volumeSummary } from "@/lib/volume";
 import { becomeAffiliate } from "@/lib/users";
 
@@ -87,6 +87,7 @@ describe("placement rules", () => {
   });
 
   it("pays nothing for registering, recruiting or filling a position", async () => {
+    await setPlan({ binaryEnabled: true });
     const root = await makeRoot();
     const a = await affiliate(root.referralCode, "LEFT");
     await affiliate(a.referralCode, "LEFT");
@@ -104,7 +105,7 @@ describe("placement rules", () => {
 
 describe("volume ledger", () => {
   it("separates pending, credited, refunded and qualifying volume and reconciles cleanly", async () => {
-    await setPlan({ holdDays: 7, pairUnitPv: 100, pairValueMinor: 1000, requireDirectOnEachLeg: false });
+    await setPlan({ holdDays: 7, pairUnitPv: 100, pairValueMinor: 1000, requireDirectOnEachLeg: false, binaryEnabled: true, binaryRetailOnly: false });
     const root = await makeRoot();
     const l = await affiliate(root.referralCode, "LEFT");
     const r = await affiliate(root.referralCode, "RIGHT");
@@ -128,7 +129,7 @@ describe("volume ledger", () => {
     expect(v.left.netPv).toBe(300);
 
     // Refund the 300 PV order: only 200 is left in carry, so carry floors at zero.
-    await refundOrder(o1.id, root.id);
+    await refundOrder(o1.id, root.id, { reason: "test" });
     const n = await node(root.id);
     expect(n.leftCarryPv).toBe(0);
     v = await volumeSummary(n);

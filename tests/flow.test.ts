@@ -1,26 +1,14 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { prisma } from "@/lib/db";
-import { address, affiliate, customer, makeRoot, node, product, resetDb, setPlan } from "./helpers";
-import { addToCart, applyPaymentEvent, cancelPendingOrder, createOrderFromCart, expireStaleOrders, refundOrder, startPayment } from "@/lib/orders";
+import { address, affiliate, bankAccount, buyAndPay, customer, later, makeRoot, node, product, resetDb, setPlan } from "./helpers";
+import { addToCart, cancelPendingOrder, createOrderFromCart, expireStaleOrders } from "@/lib/orders";
+import { applyPaymentEvent, startPayment } from "@/lib/payments/service";
+import { refundOrder } from "@/lib/refunds";
 import { matureOrders, runBinary } from "@/lib/commissions";
 import { testProvider, buildTestEvent } from "@/lib/payments/test-provider";
-import { processPayout, requestPayout, walletBalance } from "@/lib/wallet";
+import { createPayoutBatch, requestPayout, reviewPayout, settlePayout, walletBalance } from "@/lib/wallet";
 import { authenticate } from "@/lib/auth";
 import { becomeAffiliate } from "@/lib/users";
-
-async function buyAndPay(userId: string, productId: string, qty = 1) {
-  await addToCart(userId, productId, qty);
-  const order = await createOrderFromCart(userId, address);
-  await startPayment(order.id, userId);
-  const pay = await prisma.payment.findFirstOrThrow({ where: { orderId: order.id } });
-  const { body, signature } = buildTestEvent({ type: "payment.succeeded", providerRef: pay.providerRef, amountMinor: order.totalMinor, currency: "NGN" });
-  const event = await testProvider.parseWebhook(body, new Headers({ "x-test-signature": signature }));
-  const res = await applyPaymentEvent("test", event!);
-  expect(res.status).toBe("paid");
-  return order;
-}
-
-const later = (days: number) => new Date(Date.now() + days * 864e5);
 
 beforeEach(async () => {
   await resetDb();
@@ -147,7 +135,7 @@ describe("checkout, stock and payments", () => {
 
 describe("commissions", () => {
   it("credits direct bonus and leg volume only after the hold period", async () => {
-    await setPlan({ holdDays: 14, directBonusPercent: 10 });
+    await setPlan({ holdDays: 14, directRateBps: 1000 });
     const root = await makeRoot();
     const a = await affiliate(root.referralCode, "LEFT");
     const c = await customer(a.referralCode);
@@ -171,7 +159,7 @@ describe("commissions", () => {
     const c = await customer(a.referralCode);
     const p = await product({ stock: 5 });
     const order = await buyAndPay(c.id, p.id);
-    await refundOrder(order.id, root.id);
+    await refundOrder(order.id, root.id, { reason: "Customer changed mind" });
     expect(await matureOrders(later(30))).toBe(0);
     expect(await prisma.commission.count({ where: { status: { not: "REVERSED" } } })).toBe(0);
     expect(await prisma.commission.count({ where: { status: "REVERSED" } })).toBe(1);
@@ -187,13 +175,13 @@ describe("commissions", () => {
     const order = await buyAndPay(c.id, p.id);
     await matureOrders(later(1));
     expect((await walletBalance(a.id)).availableMinor).toBe(500);
-    await refundOrder(order.id, root.id);
+    await refundOrder(order.id, root.id, { reason: "Customer changed mind" });
     expect((await walletBalance(a.id)).availableMinor).toBe(0);
     expect((await node(root.id)).leftCarryPv).toBe(0);
   });
 
   it("pays binary only to qualified affiliates, once per period, with the cap", async () => {
-    await setPlan({ holdDays: 0, pairUnitPv: 100, pairValueMinor: 1000, dailyCapMinor: 3000, requireDirectOnEachLeg: true });
+    await setPlan({ holdDays: 0, pairUnitPv: 100, pairValueMinor: 1000, dailyCapMinor: 3000, requireDirectOnEachLeg: true, binaryEnabled: true, binaryRetailOnly: false });
     const root = await makeRoot();
     const s = await affiliate(root.referralCode, "LEFT", "sponsor");
     const l = await affiliate(s.referralCode, "LEFT");
@@ -216,7 +204,7 @@ describe("commissions", () => {
   });
 
   it("an affiliate without a personal referral on each leg keeps volume but isn't paid", async () => {
-    await setPlan({ holdDays: 0, requireDirectOnEachLeg: true });
+    await setPlan({ holdDays: 0, requireDirectOnEachLeg: true, binaryEnabled: true });
     const root = await makeRoot();
     const s = await affiliate(root.referralCode, "LEFT");
     const l = await affiliate(s.referralCode, "LEFT");
@@ -231,23 +219,31 @@ describe("commissions", () => {
 });
 
 describe("payouts", () => {
-  it("never lets concurrent requests exceed the balance", async () => {
-    await setPlan({ holdDays: 0, directBonusPercent: 50 });
+  it("never lets concurrent requests exceed the balance, and needs review and evidence before paid", async () => {
+    await setPlan({ holdDays: 0, directRateBps: 5000 });
     const root = await makeRoot();
     const a = await affiliate(root.referralCode, "LEFT");
     const c = await customer(a.referralCode);
     const p = await product({ priceMinor: 2000000, stock: 10 });
-    await buyAndPay(c.id, p.id); // direct bonus 1,000,000 kobo
+    await buyAndPay(c.id, p.id); // direct commission 1,000,000 kobo
     await matureOrders(later(1));
-    const results = await Promise.allSettled(
-      Array.from({ length: 4 }, () => requestPayout(a.id, { amountMinor: 600000, method: "BANK_TRANSFER", destination: "0123456789 Test Bank" })),
-    );
+    await bankAccount(a.id);
+    const results = await Promise.allSettled(Array.from({ length: 4 }, () => requestPayout(a.id, { amountMinor: 600000 })));
     expect(results.filter((r) => r.status === "fulfilled").length).toBe(1);
-    const payout = await prisma.payout.findFirstOrThrow({ where: { userId: a.id } });
-    await expect(processPayout(payout.id, "PAY", root.id, "TX1")).rejects.toThrow();
-    await processPayout(payout.id, "APPROVE", root.id);
-    await processPayout(payout.id, "PAY", root.id, "TX1");
     expect((await walletBalance(a.id)).availableMinor).toBe(400000);
+    expect((await walletBalance(a.id)).reservedMinor).toBe(600000);
+    const payout = await prisma.payout.findFirstOrThrow({ where: { userId: a.id } });
+    const evidence = { reference: "TX-0001", settledAt: new Date(), evidence: "Bank statement line 4, debit 6,000" };
+    await expect(settlePayout(payout.id, root.id, evidence)).rejects.toThrow(/requested/);
+    await expect(reviewPayout(payout.id, "APPROVE", a.id)).rejects.toThrow(/own/);
+    await reviewPayout(payout.id, "APPROVE", root.id);
+    await createPayoutBatch([payout.id], root.id);
+    await expect(settlePayout(payout.id, root.id, { ...evidence, evidence: "ok" })).rejects.toThrow();
+    await settlePayout(payout.id, root.id, evidence);
+    const w = await walletBalance(a.id);
+    expect(w.availableMinor).toBe(400000);
+    expect(w.reservedMinor).toBe(0);
+    expect(w.paidOutMinor).toBe(600000);
   });
 });
 
@@ -265,7 +261,7 @@ describe("refunds and chargebacks from the gateway", () => {
 
   it("an open dispute blocks commissions until it is won", async () => {
     const { a, order, ref } = await paidOrder();
-    await applyPaymentEvent("test", { eventId: "d1", type: "dispute.opened", providerRef: ref });
+    expect((await applyPaymentEvent("test", { eventId: "d1", type: "dispute.opened", providerRef: ref })).status).toBe("disputed");
     expect(await matureOrders(later(1))).toBe(0);
     expect((await applyPaymentEvent("test", { eventId: "d2", type: "dispute.resolved", providerRef: ref, merchantLost: false })).status).toBe("dispute_won");
     expect(await matureOrders(later(1))).toBe(1);
@@ -285,8 +281,9 @@ describe("refunds and chargebacks from the gateway", () => {
 
   it("a refund made in the gateway dashboard is recorded once", async () => {
     const { order, ref } = await paidOrder(14);
-    const e = { eventId: "r1", type: "payment.refunded" as const, providerRef: ref, amountMinor: order.totalMinor };
-    expect((await applyPaymentEvent("test", e)).status).toBe("refunded");
+    const e = { eventId: "r1", type: "refund.processed" as const, providerRef: ref, amountMinor: order.totalMinor };
+    expect((await applyPaymentEvent("test", e)).status).toBe("refund_recorded");
+    expect((await prisma.order.findUniqueOrThrow({ where: { id: order.id } })).status).toBe("REFUNDED");
     expect((await applyPaymentEvent("test", { ...e, eventId: "r2" })).status).toBe("ignored");
     expect(await matureOrders(later(30))).toBe(0);
   });

@@ -1,9 +1,15 @@
 "use server";
 
+import { rateLimit } from "@/lib/rate-limit";
+import { clientIp } from "@/lib/session";
 import { revalidatePath } from "next/cache";
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { getCurrentUser, requireUser } from "@/lib/session";
-import { addToCart, cancelPendingOrder, createOrderFromCart, setCartQuantity, startPayment, type Address } from "@/lib/orders";
+import { addToCart, cancelPendingOrder, createOrderFromCart, setCartQuantity, type Address } from "@/lib/orders";
+import { startPayment } from "@/lib/payments/service";
+import { normaliseCode } from "@/lib/discounts";
+import { DISCOUNT_COOKIE } from "@/lib/cart-code";
 import { runAction, str, type ActionState } from "@/lib/action";
 import { requestReturn } from "@/lib/returns";
 import { z } from "zod";
@@ -29,14 +35,50 @@ export async function setQuantityAction(productId: string, quantity: number, var
   });
 }
 
-export async function checkoutAction(address: Address): Promise<ActionState> {
+/** The discount code lives in an httpOnly cookie; it is re-validated on the server every time the cart is priced. */
+export async function applyDiscountAction(fd: FormData) {
+  const user = await requireUser("/cart");
+  const code = normaliseCode(str(fd, "code"));
+  // Stops guessing codes by trying many in a row.
+  const ip = await clientIp();
+  const limited = await runAction(() => rateLimit("discountCode", user.id, ip));
+  if (limited?.error) redirect(`/cart?error=${encodeURIComponent(limited.error)}`);
+  const jar = await cookies();
+  if (code) jar.set(DISCOUNT_COOKIE, code, { httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/", maxAge: 7 * 86400 });
+  else jar.delete(DISCOUNT_COOKIE);
+  revalidatePath("/cart");
+  redirect("/cart");
+}
+
+export async function removeDiscountAction() {
+  await requireUser("/cart");
+  (await cookies()).delete(DISCOUNT_COOKIE);
+  revalidatePath("/cart");
+  redirect("/cart");
+}
+
+/**
+ * `checkoutKey` is generated when the checkout page is shown. Submitting twice (double click, retry after a
+ * network error) returns the same order instead of creating a second one.
+ */
+export async function checkoutAction(address: Address, checkoutKey: string): Promise<ActionState> {
   const user = await requireUser("/checkout");
-  let url = "";
+  const limited = await runAction(() => rateLimit("checkout", user.id));
+  if (limited) return limited;
+  const jar = await cookies();
+  let orderId = "";
   const res = await runAction(async () => {
-    const order = await createOrderFromCart(user.id, address);
-    url = await startPayment(order.id, user.id);
+    const order = await createOrderFromCart(user.id, address, { checkoutKey, discountCode: jar.get(DISCOUNT_COOKIE)?.value ?? null });
+    orderId = order.id;
   });
   if (res) return res;
+  jar.delete(DISCOUNT_COOKIE);
+  let url = "";
+  const pay = await runAction(async () => {
+    url = await startPayment(orderId, user.id);
+  });
+  // The order is saved and its items are held; the buyer can retry payment from the order page.
+  if (pay?.error) redirect(`/orders/${orderId}?error=${encodeURIComponent(pay.error)}`);
   redirect(url);
 }
 

@@ -1,18 +1,25 @@
 import { timingSafeEqual } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
-import { expireStaleOrders, reconcilePendingPayments } from "@/lib/orders";
-import { matureOrders, runBinary } from "@/lib/commissions";
+import { expireStaleOrders } from "@/lib/orders";
+import { reconcilePendingPayments } from "@/lib/payments/service";
+import { BinaryDisabledError, matureOrders, runBinary } from "@/lib/commissions";
+import { reconcileLedger } from "@/lib/ledger";
+import { sealAuditLog } from "@/lib/audit";
 import { deliverPendingEmails } from "@/lib/email";
 import { prisma } from "@/lib/db";
 import { reconcileVolume } from "@/lib/volume";
 import { refreshSalePrices } from "@/lib/catalog";
+import { recordJob } from "@/lib/health";
+import { logError } from "@/lib/log";
 
 /**
  * Scheduled jobs. Call with header "Authorization: Bearer $CRON_SECRET".
  * - expire-orders: every 5 min
  * - reconcile-payments: every 10 min
  * - mature-orders: hourly
- * - binary: daily just after midnight Lagos time (pays the previous day)
+ * - binary: daily just after midnight Lagos time (pays the previous day); skipped while binary payouts are off
+ * - reconcile-ledger: daily (wallet ledger against commissions and payouts, reports only)
+ * - seal-audit: every 10 min (links new audit records into the tamper-evident hash chain)
  * - send-emails: every minute
  * - reconcile-volume: daily (checks network totals against the sales ledger, reports only)
  * - refresh-prices: hourly (sale prices that started or ended, for sorting and filtering)
@@ -34,7 +41,21 @@ function lagosDate(offsetDays = 0) {
 export async function POST(req: NextRequest, { params }: { params: Promise<{ job: string }> }) {
   if (!authorized(req)) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const { job } = await params;
+  await recordJob(job, { startedAt: new Date().toISOString() }).catch(() => undefined);
   try {
+    const res = await runJob(job, req);
+    if (res.status < 400) await recordJob(job, { okAt: new Date().toISOString() }).catch(() => undefined);
+    return res;
+  } catch (e) {
+    logError(`cron ${job}`, e);
+    const message = e instanceof Error ? e.message : "failed";
+    await recordJob(job, { failedAt: new Date().toISOString(), error: message.slice(0, 300) }).catch(() => undefined);
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
+async function runJob(job: string, req: NextRequest): Promise<NextResponse> {
+  {
     switch (job) {
       case "expire-orders":
         return NextResponse.json({ expired: await expireStaleOrders() });
@@ -61,14 +82,23 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ job
         return NextResponse.json({ matured: await matureOrders() });
       case "binary": {
         const period = new URL(req.url).searchParams.get("period") ?? lagosDate(-1);
-        const run = await runBinary(period, null);
-        return NextResponse.json({ period, pairs: run.pairsPaid, amountMinor: run.amountMinor });
+        try {
+          const run = await runBinary(period, null);
+          return NextResponse.json({ period, pairs: run.pairsPaid, amountMinor: run.amountMinor });
+        } catch (e) {
+          if (e instanceof BinaryDisabledError) return NextResponse.json({ period, skipped: "binary payouts are switched off in the plan" });
+          throw e;
+        }
       }
+      case "reconcile-ledger": {
+        const r = await reconcileLedger();
+        if (!r.ok) console.error(`ledger reconciliation found ${r.problems.length} problem(s)`);
+        return NextResponse.json({ ok: r.ok, problems: r.problems.length, members: r.members });
+      }
+      case "seal-audit":
+        return NextResponse.json({ sealed: await sealAuditLog() });
       default:
         return NextResponse.json({ error: "unknown job" }, { status: 404 });
     }
-  } catch (e) {
-    console.error(`cron ${job} failed`, e);
-    return NextResponse.json({ error: e instanceof Error ? e.message : "failed" }, { status: 500 });
   }
 }

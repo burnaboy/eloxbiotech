@@ -1,5 +1,6 @@
 "use server";
 
+import { rateLimit } from "@/lib/rate-limit";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/session";
@@ -10,6 +11,7 @@ export async function openTicketAction(fd: FormData) {
   const user = await requireUser("/support/new");
   let id = "";
   const res = await runAction(async () => {
+    await rateLimit("supportTicket", user.id);
     id = (await openTicket(user.id, { subject: str(fd, "subject"), body: str(fd, "body"), orderId: str(fd, "orderId") || undefined })).id;
   });
   if (res?.error) redirect(`/support/new?error=${encodeURIComponent(res.error)}`);
@@ -18,7 +20,10 @@ export async function openTicketAction(fd: FormData) {
 
 export async function replyTicketAction(ticketId: string, fd: FormData) {
   const user = await requireUser("/support");
-  const res = await runAction(() => replyTicket(ticketId, user.id, false, str(fd, "body")));
+  const res = await runAction(async () => {
+    await rateLimit("supportReply", user.id);
+    await replyTicket(ticketId, user.id, false, str(fd, "body"));
+  });
   revalidatePath(`/support/${ticketId}`);
   redirect(`/support/${ticketId}${res?.error ? `?error=${encodeURIComponent(res.error)}` : ""}`);
 }

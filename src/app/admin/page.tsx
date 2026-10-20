@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { EVER_PAID } from "@/lib/order-state";
 import { requireAdmin } from "@/lib/session";
 import { prisma } from "@/lib/db";
 import { getBrand } from "@/lib/settings";
@@ -15,12 +16,12 @@ export default async function AdminHome({ searchParams }: { searchParams: Promis
   const brand = await getBrand();
   const since = new Date(Date.now() - 30 * 864e5);
   const [revenue, commissions, byStatus, affiliates, customers, pendingPayouts, openReturns, openTickets, lowStock, daily] = await Promise.all([
-    prisma.order.aggregate({ where: { paidAt: { gte: since }, status: { in: ["PAID", "SHIPPED", "DELIVERED"] } }, _sum: { totalMinor: true, subtotalMinor: true }, _count: true }),
-    prisma.commission.aggregate({ where: { createdAt: { gte: since }, status: { not: "REVERSED" } }, _sum: { amountMinor: true } }),
+    prisma.order.aggregate({ where: { paidAt: { gte: since }, status: { in: EVER_PAID } }, _sum: { totalMinor: true, refundedMinor: true, subtotalMinor: true }, _count: true }),
+    prisma.commission.aggregate({ where: { createdAt: { gte: since }, status: { not: "REVERSED" } }, _sum: { amountMinor: true, reversedMinor: true } }),
     prisma.order.groupBy({ by: ["status"], _count: true }),
     prisma.user.count({ where: { role: "AFFILIATE" } }),
     prisma.user.count({ where: { role: "CUSTOMER" } }),
-    prisma.payout.aggregate({ where: { status: { in: ["REQUESTED", "APPROVED"] } }, _sum: { amountMinor: true }, _count: true }),
+    prisma.payout.aggregate({ where: { status: { in: ["REQUESTED", "APPROVED", "PROCESSING"] } }, _sum: { amountMinor: true }, _count: true }),
     prisma.returnRequest.count({ where: { status: { in: ["REQUESTED", "APPROVED"] } } }),
     prisma.supportTicket.count({ where: { status: "OPEN" } }),
     prisma.$queryRaw<{ n: bigint }[]>`SELECT COUNT(*)::bigint AS n FROM "Product" p WHERE p.status = 'ACTIVE' AND (
@@ -29,13 +30,14 @@ export default async function AdminHome({ searchParams }: { searchParams: Promis
     prisma.$queryRaw<{ day: Date; revenue: bigint; commissions: bigint }[]>`
       WITH days AS (SELECT generate_series(date_trunc('day', now() - interval '29 days'), date_trunc('day', now()), interval '1 day') AS day)
       SELECT d.day,
-        COALESCE((SELECT SUM("totalMinor") FROM "Order" o WHERE date_trunc('day', o."paidAt") = d.day AND o.status IN ('PAID','SHIPPED','DELIVERED')), 0)::bigint AS revenue,
-        COALESCE((SELECT SUM("amountMinor") FROM "Commission" c WHERE date_trunc('day', c."createdAt") = d.day AND c.status <> 'REVERSED'), 0)::bigint AS commissions
+        COALESCE((SELECT SUM("totalMinor" - "refundedMinor") FROM "Order" o WHERE date_trunc('day', o."paidAt") = d.day AND o."paidAt" IS NOT NULL), 0)::bigint AS revenue,
+        COALESCE((SELECT SUM("amountMinor" - "reversedMinor") FROM "Commission" c WHERE date_trunc('day', c."createdAt") = d.day AND c.status <> 'REVERSED'), 0)::bigint AS commissions
       FROM days d ORDER BY d.day`,
   ]);
   const m = (v: number) => formatMoney(v, brand.currency);
-  const rev = revenue._sum.totalMinor ?? 0;
-  const comm = commissions._sum.amountMinor ?? 0;
+  // Net of refunds and commission reversals.
+  const rev = (revenue._sum.totalMinor ?? 0) - (revenue._sum.refundedMinor ?? 0);
+  const comm = (commissions._sum.amountMinor ?? 0) - (commissions._sum.reversedMinor ?? 0);
   const payoutRatio = (revenue._sum.subtotalMinor ?? 0) > 0 ? ((comm / (revenue._sum.subtotalMinor ?? 1)) * 100).toFixed(1) : "0";
   return (
     <>

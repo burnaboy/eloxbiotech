@@ -1,6 +1,7 @@
 import type { AffiliateNode, Leg, Prisma } from "@prisma/client";
 import { prisma } from "./db";
 import { audit } from "./audit";
+import { LIVE_PAID } from "./order-state";
 
 /*
  * Volume definitions shown to members and admins
@@ -13,7 +14,7 @@ import { audit } from "./audit";
  * Every figure comes from the VolumeEntry ledger, which is written only when an order matures or is reversed.
  */
 
-const PAID = ["PAID", "SHIPPED", "DELIVERED"];
+const PAID: string[] = LIVE_PAID;
 
 export interface LegVolume {
   creditedPv: number;
@@ -35,13 +36,13 @@ async function pendingPvUnder(nodeId: string | null, includeSelf: boolean, selfI
   if (!nodeId && !includeSelf) return 0;
   const rows = includeSelf
     ? await prisma.$queryRaw<{ pv: number }[]>`
-        SELECT COALESCE(SUM(o."totalPv"), 0)::int AS pv FROM "Order" o
+        SELECT COALESCE(SUM(o."totalPv" - o."refundedPv"), 0)::int AS pv FROM "Order" o
         WHERE o."volumeNodeId" = ${selfId} AND o.status::text = ANY(${PAID}) AND o."commissionedAt" IS NULL`
     : await prisma.$queryRaw<{ pv: number }[]>`
-        SELECT COALESCE(SUM(o."totalPv"), 0)::int AS pv FROM "Order" o
+        SELECT COALESCE(SUM(o."totalPv" - o."refundedPv"), 0)::int AS pv FROM "Order" o
         JOIN "AffiliateNode" n ON n.id = o."volumeNodeId"
         WHERE o.status::text = ANY(${PAID}) AND o."commissionedAt" IS NULL
-          AND (n.id = ${nodeId} OR ${nodeId} = ANY(n."ancestorIds"))`;
+          AND (n.id = ${nodeId} OR n."ancestorIds" @> ARRAY[${nodeId}]::text[])`; // @> uses the GIN index
   return rows[0]?.pv ?? 0;
 }
 
@@ -89,6 +90,7 @@ export interface ReconcileIssue {
  *   - each order's ledger entries against the order itself (matured orders credit totalPv up the
  *     correct leg of every ancestor; unmatured, refunded or cancelled orders net to zero)
  *   - direct commissions on refunded or cancelled orders must be reversed or clawed back
+ *   - every live direct commission equals floor(eligible net sales left × its rate / 10000)
  * Read-only: it reports problems, it never edits balances.
  */
 export async function reconcileVolume(actorId: string | null = null) {
@@ -137,7 +139,7 @@ export async function reconcileVolume(actorId: string | null = null) {
 
   const orders = await prisma.$queryRaw<{ number: string; expected: number; actual: number }[]>`
     SELECT o.number,
-      CASE WHEN o.status::text = ANY(${PAID}) AND o."commissionedAt" IS NOT NULL AND o."volumeNodeId" IS NOT NULL THEN o."totalPv" ELSE 0 END AS expected,
+      CASE WHEN o.status::text = ANY(${PAID}) AND o."commissionedAt" IS NOT NULL AND o."volumeNodeId" IS NOT NULL THEN o."totalPv" - o."refundedPv" ELSE 0 END AS expected,
       COALESCE((SELECT SUM(v.pv) FROM "VolumeEntry" v WHERE v."orderId" = o.id AND v.leg IS NULL AND v."nodeId" = o."volumeNodeId"), 0)::int AS actual
     FROM "Order" o
     WHERE o."commissionedAt" IS NOT NULL OR EXISTS (SELECT 1 FROM "VolumeEntry" v WHERE v."orderId" = o.id)`;
@@ -172,6 +174,18 @@ export async function reconcileVolume(actorId: string | null = null) {
       AND NOT EXISTS (SELECT 1 FROM "Commission" adj WHERE adj.type = 'ADJUSTMENT' AND adj.details->>'reverses' = c.id)`;
   for (const c of commissions) {
     issues.push({ kind: "commission", ref: c.number, detail: `direct commission ${c.id} is still live on a refunded or cancelled order` });
+  }
+
+  const recalculated = await prisma.$queryRaw<{ number: string; id: string; effective: number; expected: number }[]>`
+    SELECT o.number, c.id, (c."amountMinor" - c."reversedMinor")::int AS effective,
+      FLOOR(COALESCE(SUM(i."netMinor" - i."refundedNetMinor") FILTER (WHERE i.commissionable), 0)::numeric * c."rateBps" / 10000)::int AS expected
+    FROM "Commission" c JOIN "Order" o ON o.id = c."orderId" JOIN "OrderItem" i ON i."orderId" = o.id
+    WHERE c.type = 'DIRECT' AND c."rateBps" IS NOT NULL AND c.status <> 'REVERSED'
+    GROUP BY o.number, c.id
+    HAVING (c."amountMinor" - c."reversedMinor") <> FLOOR(COALESCE(SUM(i."netMinor" - i."refundedNetMinor") FILTER (WHERE i.commissionable), 0)::numeric * c."rateBps" / 10000)
+    LIMIT 100`;
+  for (const c of recalculated) {
+    issues.push({ kind: "commission", ref: c.number, detail: `direct commission ${c.id} is ${c.effective}, but the sale left supports ${c.expected}` });
   }
 
   const result = { checkedAt: new Date().toISOString(), nodes: nodes.length, orders: orders.length, issueCount: issues.length, issues: issues.slice(0, 100) };

@@ -28,6 +28,8 @@ enum AdminPermission {
   AUDIT
   /// See and edit product cost prices and margins.
   PRODUCT_COSTS
+  /// See members' full bank account numbers and export payout batches.
+  PAYOUT_DETAILS
 }
 
 enum ReturnStatus {
@@ -53,13 +55,28 @@ enum Leg {
   RIGHT
 }
 
+/// Order lifecycle. Allowed moves are defined in src/lib/order-state.ts.
 enum OrderStatus {
   PENDING_PAYMENT
   PAID
+  PROCESSING
   SHIPPED
   DELIVERED
   CANCELLED
   REFUNDED
+  PARTIALLY_REFUNDED
+}
+
+enum RefundStatus {
+  /// Sent to the gateway, waiting for confirmation.
+  PENDING
+  PROCESSED
+  FAILED
+}
+
+enum DiscountType {
+  PERCENT
+  FIXED
 }
 
 enum PaymentStatus {
@@ -67,6 +84,7 @@ enum PaymentStatus {
   SUCCEEDED
   FAILED
   REFUNDED
+  PARTIALLY_REFUNDED
 }
 
 enum InventoryReason {
@@ -110,11 +128,51 @@ enum CommissionStatus {
   PAID
 }
 
+enum PayoutAccountStatus {
+  ACTIVE
+  REMOVED
+}
+
+enum PayoutBatchStatus {
+  /// Payouts are in the batch and being sent.
+  OPEN
+  /// The transfer file has been downloaded for the bank.
+  EXPORTED
+  /// Every payout in it is paid or failed.
+  CLOSED
+}
+
+/// REQUESTED (funds reserved) → APPROVED (reviewed) → PROCESSING (sent to the bank or provider) → PAID,
+/// or REJECTED / FAILED, which release the reserved funds back to the wallet.
 enum PayoutStatus {
   REQUESTED
   APPROVED
+  PROCESSING
   PAID
   REJECTED
+  FAILED
+}
+
+enum LedgerType {
+  COMMISSION_EARNED
+  COMMISSION_APPROVED
+  COMMISSION_HELD
+  COMMISSION_RELEASED
+  COMMISSION_REVERSED
+  WITHDRAWAL_RESERVED
+  WITHDRAWAL_PAID
+  WITHDRAWAL_RELEASED
+  ADMIN_CORRECTION
+}
+
+/// Where a member's money sits. See src/lib/ledger.ts for the sign convention.
+enum LedgerBucket {
+  PENDING
+  HELD
+  AVAILABLE
+  RESERVED
+  PAID_OUT
+  REVERSED
 }
 
 model User {
@@ -148,18 +206,22 @@ model User {
   createdAt              DateTime          @default(now())
   updatedAt              DateTime          @updatedAt
 
-  sessions      Session[]
-  node          AffiliateNode?
-  cartItems     CartItem[]
-  orders        Order[]
-  commissions   Commission[]
-  payouts       Payout[]
-  addresses     Address[]
-  notifications Notification[]
-  tickets       SupportTicket[]
-  returns       ReturnRequest[]
+  sessions       Session[]
+  node           AffiliateNode?
+  cartItems      CartItem[]
+  orders         Order[]
+  commissions    Commission[]
+  payouts        Payout[]
+  payoutAccounts PayoutAccount[]
+  ledger         LedgerEntry[]
+  addresses      Address[]
+  notifications  Notification[]
+  tickets        SupportTicket[]
+  returns        ReturnRequest[]
 
   @@index([sponsorId])
+  @@index([createdAt])
+  @@index([role, status])
 }
 
 model Session {
@@ -177,6 +239,7 @@ model Session {
   userAgent     String?
 
   @@index([userId])
+  @@index([expiresAt])
 }
 
 model LoginAttempt {
@@ -186,6 +249,7 @@ model LoginAttempt {
   createdAt DateTime @default(now())
 
   @@index([key, createdAt])
+  @@index([createdAt])
 }
 
 /// A position in the binary tree. One per affiliate.
@@ -219,6 +283,9 @@ model AffiliateNode {
 
   @@unique([parentId, position])
   @@index([parentId])
+  /// Descendant queries ("everyone under X") use `ancestorIds @> ARRAY[X]`, served by this GIN index.
+  @@index([ancestorIds], type: Gin)
+  @@index([depth])
 }
 
 /// Every PV credit to a node's leg, so volume can be audited and reversed.
@@ -303,11 +370,15 @@ model Product {
   lowStockThreshold Int       @default(5)
   lowStockAlertedAt DateTime?
 
-  shippable   Boolean @default(true)
-  weightGrams Int     @default(0)
-  lengthMm    Int?
-  widthMm     Int?
-  heightMm    Int?
+  shippable      Boolean @default(true)
+  /// VAT-exempt goods (for example some basic food and medical items).
+  taxExempt      Boolean @default(false)
+  /// Whether sales of this product earn direct commission (per the approved plan).
+  commissionable Boolean @default(true)
+  weightGrams    Int     @default(0)
+  lengthMm       Int?
+  widthMm        Int?
+  heightMm       Int?
 
   metaTitle       String?
   metaDescription String?
@@ -412,16 +483,31 @@ model CartItem {
 }
 
 model Order {
-  id            String      @id @default(cuid())
-  number        String      @unique
+  id            String           @id @default(cuid())
+  number        String           @unique
   userId        String
-  user          User        @relation(fields: [userId], references: [id])
-  status        OrderStatus @default(PENDING_PAYMENT)
+  user          User             @relation(fields: [userId], references: [id])
+  status        OrderStatus      @default(PENDING_PAYMENT)
   currency      String
+  /// Sum of item prices (after any sale price), before discount.
   subtotalMinor Int
+  discountMinor Int              @default(0)
+  discountCode  String?
   shippingMinor Int
+  /// VAT. When taxIncluded, it is the VAT already inside the prices; otherwise it was added to the total.
+  taxMinor      Int              @default(0)
+  taxRateBps    Int              @default(0)
+  taxIncluded   Boolean          @default(true)
   totalMinor    Int
   totalPv       Int
+  /// Running totals of partial and full refunds.
+  refundedMinor Int              @default(0)
+  refundedPv    Int              @default(0)
+  /// Compensation plan version in force when the order was paid. All of its commissions use these rules.
+  planVersionId String?
+  planVersion   CompPlanVersion? @relation(fields: [planVersionId], references: [id])
+  /// "<userId>:<token>" from the checkout form, so a double-submitted checkout makes one order.
+  checkoutKey   String?          @unique
   /// Node that receives this order's volume (buyer's node, or their sponsor's node for customers).
   volumeNodeId  String?
   /// Sponsor credited with the direct bonus, snapshotted at checkout.
@@ -440,99 +526,216 @@ model Order {
   shippedAt   DateTime?
   deliveredAt DateTime?
 
-  paidAt         DateTime?
+  paidAt             DateTime?
+  /// The payment that paid this order. Any other successful payment on it is an extra payment to give back.
+  paidPaymentId      String?   @unique
+  processingAt       DateTime?
+  cancelledAt        DateTime?
+  cancelReason       String?
+  confirmationSentAt DateTime?
   /// Set while a chargeback is open; such orders don't earn commissions until it's resolved.
-  disputedAt     DateTime?
+  disputedAt         DateTime?
   /// Set when the refund-hold window passes and commissions + volume are credited.
-  commissionedAt DateTime?
-  expiresAt      DateTime
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  commissionedAt     DateTime?
+  expiresAt          DateTime
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
   items       OrderItem[]
   payments    Payment[]
   volumes     VolumeEntry[]
   commissions Commission[]
   returns     ReturnRequest[]
+  refunds     Refund[]
+  redemption  DiscountRedemption?
 
   @@index([userId])
   @@index([referrerId])
   @@index([status, paidAt])
+  @@index([createdAt])
+  @@index([status, createdAt])
+  @@index([status, expiresAt])
+  @@index([commissionedAt, paidAt])
+  @@index([volumeNodeId])
 }
 
 model OrderItem {
-  id             String          @id @default(cuid())
-  orderId        String
-  order          Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  productId      String
-  product        Product         @relation(fields: [productId], references: [id])
-  variantId      String?
-  variant        ProductVariant? @relation(fields: [variantId], references: [id])
-  name           String
-  variantName    String?
-  sku            String
-  unitPriceMinor Int
+  id               String          @id @default(cuid())
+  orderId          String
+  order            Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId        String
+  product          Product         @relation(fields: [productId], references: [id])
+  variantId        String?
+  variant          ProductVariant? @relation(fields: [variantId], references: [id])
+  name             String
+  variantName      String?
+  sku              String
+  unitPriceMinor   Int
   /// The regular price at the time, when the item was bought on sale.
-  listPriceMinor Int?
-  pv             Int
-  quantity       Int
+  listPriceMinor   Int?
+  pv               Int
+  quantity         Int
+  /// This line's share of the order discount, and what the customer paid for it in total
+  /// (after discount, plus VAT when VAT was added on top). Partial refunds are worked out from paidMinor.
+  discountMinor    Int             @default(0)
+  paidMinor        Int             @default(0)
+  /// VAT inside this line, and the line's value excluding VAT after discount: the commissionable base.
+  taxMinor         Int             @default(0)
+  netMinor         Int             @default(0)
+  commissionable   Boolean         @default(true)
+  refundedQty      Int             @default(0)
+  refundedMinor    Int             @default(0)
+  refundedNetMinor Int             @default(0)
   /// Returned units put back into stock, and units written off, after a refund.
-  restockedQty   Int             @default(0)
-  writtenOffQty  Int             @default(0)
+  restockedQty     Int             @default(0)
+  writtenOffQty    Int             @default(0)
 }
 
 model Payment {
-  id          String        @id @default(cuid())
-  orderId     String
-  order       Order         @relation(fields: [orderId], references: [id])
-  provider    String
-  providerRef String        @unique
-  status      PaymentStatus @default(PENDING)
-  amountMinor Int
-  currency    String
-  raw         Json?
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  id               String        @id @default(cuid())
+  orderId          String
+  order            Order         @relation(fields: [orderId], references: [id])
+  provider         String
+  providerRef      String        @unique
+  status           PaymentStatus @default(PENDING)
+  amountMinor      Int
+  currency         String
+  /// Gateway checkout page for this attempt, reused if the buyer clicks Pay again.
+  authorizationUrl String?
+  failureReason    String?
+  verifiedAt       DateTime?
+  refundedMinor    Int           @default(0)
+  raw              Json?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  refunds Refund[]
 
   @@index([orderId])
+  @@index([status, createdAt])
 }
 
-/// Idempotency for payment webhooks.
+model Refund {
+  id               String       @id @default(cuid())
+  orderId          String
+  order            Order        @relation(fields: [orderId], references: [id])
+  paymentId        String?
+  payment          Payment?     @relation(fields: [paymentId], references: [id])
+  amountMinor      Int
+  status           RefundStatus @default(PENDING)
+  /// Gateway refund id, unique so a refund webhook can only be matched once.
+  providerRefundId String?      @unique
+  reason           String
+  /// [{ orderItemId, quantity, amountMinor }] plus shippingMinor, for partial refunds.
+  lines            Json         @default("[]")
+  /// Where the refund came from: an admin, the gateway dashboard, or a chargeback.
+  source           String       @default("admin")
+  actorId          String?
+  /// Why the gateway refused or couldn't confirm it. Shown on the order and risk pages so staff can retry.
+  failureReason    String?
+  attempts         Int          @default(0)
+  createdAt        DateTime     @default(now())
+  processedAt      DateTime?
+
+  @@index([orderId])
+  @@index([status])
+  @@index([paymentId])
+}
+
+model DiscountCode {
+  id               String       @id @default(cuid())
+  /// Stored upper-case; customers can type any case.
+  code             String       @unique
+  description      String
+  type             DiscountType
+  /// PERCENT: basis points (1000 = 10%). FIXED: kobo.
+  value            Int
+  minSubtotalMinor Int          @default(0)
+  /// Cap for percentage discounts, in kobo. Null = no cap.
+  maxDiscountMinor Int?
+  startsAt         DateTime?
+  endsAt           DateTime?
+  /// Null = unlimited.
+  maxRedemptions   Int?
+  perCustomerLimit Int          @default(1)
+  /// Counts orders holding the code (released if the order is cancelled).
+  redeemedCount    Int          @default(0)
+  active           Boolean      @default(true)
+  createdById      String
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  redemptions DiscountRedemption[]
+}
+
+model DiscountRedemption {
+  id          String       @id @default(cuid())
+  codeId      String
+  code        DiscountCode @relation(fields: [codeId], references: [id])
+  orderId     String       @unique
+  order       Order        @relation(fields: [orderId], references: [id])
+  userId      String
+  amountMinor Int
+  createdAt   DateTime     @default(now())
+
+  @@index([codeId, userId])
+}
+
+/// Every payment event we act on (webhook, callback check, reconciliation), stored once.
+/// The unique key makes processing idempotent: a replayed event is rejected by the database.
 model WebhookEvent {
-  id         String   @id @default(cuid())
-  provider   String
-  eventId    String
-  type       String
-  receivedAt DateTime @default(now())
+  id          String   @id @default(cuid())
+  provider    String
+  eventId     String
+  type        String
+  /// webhook | callback | reconcile | admin
+  source      String   @default("webhook")
+  providerRef String?
+  /// What we did with it, e.g. paid, duplicate_payment, amount_mismatch, ignored_out_of_order.
+  result      String?
+  payload     Json?
+  receivedAt  DateTime @default(now())
 
   @@unique([provider, eventId])
+  @@index([providerRef])
+  @@index([receivedAt, result])
 }
 
 model Commission {
-  id          String           @id @default(cuid())
-  userId      String
-  user        User             @relation(fields: [userId], references: [id])
-  type        CommissionType
-  status      CommissionStatus @default(PENDING)
-  amountMinor Int
+  id            String           @id @default(cuid())
+  userId        String
+  user          User             @relation(fields: [userId], references: [id])
+  type          CommissionType
+  status        CommissionStatus @default(PENDING)
+  amountMinor   Int
+  /// Taken back after refunds or chargebacks. The amount itself is never edited; effective = amount − reversed.
+  reversedMinor Int              @default(0)
+  ledger        LedgerEntry[]
   /// How much of this commission has been covered by completed payouts.
-  paidMinor   Int              @default(0)
-  releaseAt   DateTime?
-  approvedAt  DateTime?
-  holdReason  String?
-  orderId     String?
-  order       Order?           @relation(fields: [orderId], references: [id])
-  runId       String?
-  run         BinaryRun?       @relation(fields: [runId], references: [id])
-  /// Pairs paid, PV consumed, cap applied etc.
-  details     Json?
-  note        String?
-  createdAt   DateTime         @default(now())
+  paidMinor     Int              @default(0)
+  releaseAt     DateTime?
+  approvedAt    DateTime?
+  holdReason    String?
+  orderId       String?
+  order         Order?           @relation(fields: [orderId], references: [id])
+  runId         String?
+  run           BinaryRun?       @relation(fields: [runId], references: [id])
+  /// Rule version, qualifying sale amount and rate used, so the figure can be reproduced exactly.
+  planVersionId String?
+  planVersion   CompPlanVersion? @relation(fields: [planVersionId], references: [id])
+  baseMinor     Int?
+  rateBps       Int?
+  /// Calculation inputs: pairs paid, PV consumed, cap applied, adjustments etc.
+  details       Json?
+  note          String?
+  createdAt     DateTime         @default(now())
 
   @@unique([userId, type, orderId])
   @@index([userId, createdAt])
   @@index([orderId])
   @@index([status])
+  @@index([createdAt])
+  @@index([status, createdAt])
 }
 
 /// One binary pairing run per period (e.g. per day). periodKey is unique so a run can never pay twice.
@@ -550,20 +753,119 @@ model BinaryRun {
 }
 
 model Payout {
-  id            String       @id @default(cuid())
-  userId        String
-  user          User         @relation(fields: [userId], references: [id])
-  amountMinor   Int
-  status        PayoutStatus @default(REQUESTED)
-  method        String
-  destination   String
-  reference     String?
-  processedById String?
-  processedAt   DateTime?
-  note          String?
-  createdAt     DateTime     @default(now())
+  id                 String         @id @default(cuid())
+  userId             String
+  user               User           @relation(fields: [userId], references: [id])
+  amountMinor        Int
+  status             PayoutStatus   @default(REQUESTED)
+  method             String
+  destination        String
+  /// Bank or provider transfer reference. Unique, so the same transfer can't be recorded against two payouts.
+  reference          String?        @unique
+  /// From the request form, so a double-submitted request makes one payout.
+  requestKey         String?        @unique
+  reviewedById       String?
+  reviewedAt         DateTime?
+  processedById      String?
+  processedAt        DateTime?
+  failureReason      String?
+  note               String?
+  /// The bank account it goes to (snapshot at request time; `destination` holds the masked label).
+  payoutAccountId    String?
+  payoutAccount      PayoutAccount? @relation(fields: [payoutAccountId], references: [id])
+  /// Increases each time a failed payout is queued again (funds are reserved again for each attempt).
+  attempt            Int            @default(1)
+  batchId            String?
+  batch              PayoutBatch?   @relation(fields: [batchId], references: [id])
+  /// Proof the money arrived: "provider" (gateway transfer result) or "bank" (bank statement / transfer receipt).
+  settlementSource   String?
+  settlementEvidence String?
+  settledAt          DateTime?
+  createdAt          DateTime       @default(now())
+
+  ledger LedgerEntry[]
 
   @@index([userId, status])
+  @@index([status, createdAt])
+  @@index([batchId])
+  @@index([settledAt])
+}
+
+/// A member's bank account for withdrawals. Only what is needed to pay is kept: bank, account number
+/// (encrypted), and the account name returned by verification. Staff see the number masked unless they
+/// hold the PAYOUT_DETAILS permission.
+model PayoutAccount {
+  id               String              @id @default(cuid())
+  userId           String
+  user             User                @relation(fields: [userId], references: [id])
+  bankCode         String
+  bankName         String
+  accountNumberEnc String
+  accountLast4     String
+  /// Keyed hash of bank + number, to spot one account used by several members without decrypting.
+  fingerprint      String
+  accountName      String
+  /// "paystack", "test", or null when it couldn't be checked automatically (staff check it at review).
+  verifiedBy       String?
+  verifiedAt       DateTime?
+  /// Withdrawals to a newly added account are allowed only after this time (protects against account takeover).
+  usableFrom       DateTime
+  status           PayoutAccountStatus @default(ACTIVE)
+  createdAt        DateTime            @default(now())
+  removedAt        DateTime?
+
+  payouts Payout[]
+
+  @@index([userId, status])
+  @@index([fingerprint])
+}
+
+/// A group of approved payouts sent together (e.g. one bank bulk-transfer file).
+model PayoutBatch {
+  id           String            @id @default(cuid())
+  number       String            @unique
+  status       PayoutBatchStatus @default(OPEN)
+  totalMinor   Int
+  count        Int
+  createdById  String
+  exportedById String?
+  exportedAt   DateTime?
+  closedAt     DateTime?
+  createdAt    DateTime          @default(now())
+
+  payouts Payout[]
+}
+
+/// Append-only money ledger. Rows are never updated or deleted (database trigger); mistakes are fixed with new,
+/// compensating entries. Every row moves a positive amount from one bucket to another for one member.
+model LedgerEntry {
+  id             String        @id @default(cuid())
+  userId         String
+  user           User          @relation(fields: [userId], references: [id])
+  type           LedgerType
+  amountMinor    Int
+  /// Null means money entering from outside (a sale) or leaving (a correction debit).
+  fromBucket     LedgerBucket?
+  toBucket       LedgerBucket?
+  /// What caused it, e.g. ("Commission", id), ("Payout", id), ("Correction", auditId).
+  sourceType     String
+  sourceId       String
+  commissionId   String?
+  commission     Commission?   @relation(fields: [commissionId], references: [id], onDelete: Restrict)
+  payoutId       String?
+  payout         Payout?       @relation(fields: [payoutId], references: [id], onDelete: Restrict)
+  /// Unique per business event, so retries and duplicate events can never post twice.
+  idempotencyKey String        @unique
+  memo           String?
+  actorId        String?
+  createdAt      DateTime      @default(now())
+
+  @@index([userId, createdAt])
+  @@index([commissionId])
+  @@index([sourceType, sourceId])
+  @@index([payoutId])
+  @@index([type, createdAt])
+  @@index([createdAt])
 }
 
 model Setting {
@@ -572,13 +874,20 @@ model Setting {
   updatedAt DateTime @updatedAt
 }
 
+/// Tamper-evident: each row stores a hash of its content and of the previous row, and rows can't be
+/// updated or deleted (database trigger). verifyAuditChain() re-computes the chain.
 model AuditLog {
   id        String   @id @default(cuid())
+  seq       Int      @unique @default(autoincrement())
   actorId   String?
   action    String
   entity    String
   entityId  String?
   data      Json?
+  /// Position in the hash chain, assigned when the row is sealed (see src/lib/audit.ts).
+  chainPos  Int?     @unique
+  prevHash  String?
+  hash      String?
   createdAt DateTime @default(now())
 
   @@index([entity, entityId])
@@ -706,6 +1015,8 @@ model EmailOutbox {
   sentAt    DateTime?
   error     String?
   createdAt DateTime  @default(now())
+
+  @@index([sentAt, createdAt])
 }
 
 model EmailVerificationToken {
@@ -738,4 +1049,18 @@ model PlacementRecord {
   actorId   String?
   note      String?
   createdAt DateTime        @default(now())
+}
+
+/// Every saved compensation plan becomes a new, immutable version. Orders record the version in force when
+/// they were paid, and commissions record the version they were calculated with.
+model CompPlanVersion {
+  id          String   @id @default(cuid())
+  version     Int      @unique
+  rules       Json
+  note        String?
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  orders      Order[]
+  commissions Commission[]
 }

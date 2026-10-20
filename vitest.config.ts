@@ -6,6 +6,9 @@ const env = {
   TEST_PAYMENT_SECRET: "test-secret",
   PAYMENT_PROVIDER: "test",
   CURRENCY: "NGN",
+  // Test-only key for encrypting bank account numbers in the test database.
+  APP_ENCRYPTION_KEY: "dGVzdC1vbmx5LWtleS0zMi1ieXRlcy1sb25nLSEhISE=",
+  PAYOUT_VERIFICATION: "test",
 };
 
 export default defineConfig({

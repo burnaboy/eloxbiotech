@@ -1,9 +1,11 @@
 import { prisma } from "@/lib/db";
 import { registerUser } from "@/lib/users";
-import { DEFAULT_COMP_PLAN, saveSetting, type CompPlan } from "@/lib/settings";
+import { DEFAULT_COMP_PLAN, type CompPlan } from "@/lib/settings";
+import { publishPlan } from "@/lib/comp-plan";
 import { hashPassword } from "@/lib/auth";
 import { expect } from "vitest";
-import { addToCart, applyPaymentEvent, createOrderFromCart, startPayment } from "@/lib/orders";
+import { addToCart, createOrderFromCart } from "@/lib/orders";
+import { applyPaymentEvent, startPayment } from "@/lib/payments/service";
 import { testProvider, buildTestEvent } from "@/lib/payments/test-provider";
 
 export async function buyAndPay(userId: string, productId: string, qty = 1) {
@@ -24,14 +26,23 @@ export async function resetDb() {
   const tables = [
     "EmailVerificationToken", "PasswordResetToken", "EmailOutbox", "ContactMessage", "Testimonial", "SupportMessage", "SupportTicket",
     "ReturnRequest", "Notification", "Address", "Category",
-    "AuditLog", "Setting", "CarryMovement", "PlacementRecord", "Payout", "Commission", "BinaryRun", "WebhookEvent", "Payment", "VolumeEntry",
+    "AuditLog", "Setting", "CarryMovement", "PlacementRecord", "LedgerEntry", "Payout", "PayoutBatch", "PayoutAccount", "Commission", "CompPlanVersion",
+    "Refund", "DiscountRedemption", "DiscountCode", "BinaryRun", "WebhookEvent", "Payment", "VolumeEntry",
     "OrderItem", "Order", "CartItem", "InventoryMovement", "ProductImage", "ProductVariant", "Product", "AffiliateNode", "LoginAttempt", "Session", "User",
   ];
   await prisma.$executeRawUnsafe(`TRUNCATE ${tables.map((t) => `"${t}"`).join(", ")} CASCADE`);
 }
 
+/** Publishes a new plan version, the same way Admin > Settings does. */
 export async function setPlan(p: Partial<CompPlan>) {
-  await saveSetting("compPlan", { ...DEFAULT_COMP_PLAN, ...p });
+  await publishPlan({ ...DEFAULT_COMP_PLAN, ...p }, null, "test");
+}
+
+/** Gives a member a verified bank account that can be paid straight away. */
+export async function bankAccount(userId: string) {
+  const { savePayoutAccount } = await import("@/lib/payouts/accounts");
+  const a = await savePayoutAccount(userId, { bankCode: "058", accountNumber: "0123456789" });
+  return prisma.payoutAccount.update({ where: { id: a.id }, data: { usableFrom: new Date(Date.now() - 1000) } });
 }
 
 let n = 0;

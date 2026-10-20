@@ -20,6 +20,7 @@ test("super admin must set up two-step verification, then can ship an order and 
 
   const order = await db.order.findFirstOrThrow({ where: { status: "PAID" } });
   await page.goto(`/admin/orders/${order.id}`);
+  await page.waitForLoadState("networkidle"); // let the page hydrate before submitting
   await page.getByLabel("Carrier").fill("GIG Logistics");
   await page.getByLabel("Tracking reference").fill("GIG123");
   await page.getByRole("button", { name: "Mark shipped" }).click();
@@ -28,15 +29,15 @@ test("super admin must set up two-step verification, then can ship an order and 
   // Refund is a sensitive action: it asks for a fresh code first.
   await page.getByLabel("Reason").fill("Customer changed mind");
   await page.getByLabel("Confirmation").fill("REFUND");
-  await page.getByRole("button", { name: "Refund order" }).click();
+  await page.getByRole("button", { name: "Refund", exact: true }).click();
   await expect(page).toHaveURL(/\/admin\/verify/);
   await page.getByLabel("Authentication code").fill(await totpFor(ADMIN));
   await page.getByRole("button", { name: "Confirm" }).click();
   await expect(page).toHaveURL(new RegExp(`/admin/orders/${order.id}`));
   await page.getByLabel("Reason").fill("Customer changed mind");
   await page.getByLabel("Confirmation").fill("REFUND");
-  await page.getByRole("button", { name: "Refund order" }).click();
-  await expect(page.getByText("Order refunded")).toBeVisible();
+  await page.getByRole("button", { name: "Refund", exact: true }).click();
+  await expect(page.getByText("Refund processed")).toBeVisible();
 
   const after = await db.order.findUniqueOrThrow({ where: { id: order.id } });
   expect(after.status).toBe("REFUNDED");
@@ -45,7 +46,7 @@ test("super admin must set up two-step verification, then can ship an order and 
 
   // The ledger check finds nothing wrong after a refund.
   await page.goto("/admin/risk");
-  await page.getByRole("button", { name: "Run check now" }).click();
+  await page.getByRole("button", { name: "Check network volume" }).click();
   await expect(page.getByText(/match the ledger/)).toBeVisible();
 
   // A member waiting for approval gets placed from the queue (the code above is still fresh).
@@ -55,6 +56,9 @@ test("super admin must set up two-step verification, then can ship an order and 
   });
   await page.goto("/admin/network");
   await expect(page.getByText("Waiting for placement")).toBeVisible();
+  // Placement is permanent, so it needs a reason and a typed confirmation.
+  await page.getByLabel(/Why this position/).fill("Sponsor asked for the right side");
+  await page.getByLabel(/Type PLACE to confirm/).fill("PLACE");
   await page.getByRole("button", { name: "Place" }).click();
   await expect(page.getByText("Member placed")).toBeVisible();
   const rec = await db.placementRecord.findFirstOrThrow({ where: { userId: pending.id } });

@@ -87,14 +87,14 @@ export async function adjustStock(input: { productId: string; variantId: string 
 }
 
 /**
- * Records what came back after a refunded order was returned: units fit to resell go back to stock,
+ * Records what came back after refunded items were returned: units fit to resell go back to stock,
  * the rest are written off. Each order line can only be accounted for once, up to its quantity.
  */
 export async function receiveReturnedItems(orderId: string, lines: { orderItemId: string; restock: number; writeOff: number }[], actorId: string, note?: string) {
   return prisma.$transaction(async (tx) => {
     const order = await tx.order.findUniqueOrThrow({ where: { id: orderId }, include: { items: true } });
-    if (order.status !== "REFUNDED") throw new AppError("Record returned goods after the order has been refunded.");
-    if (!order.shippedAt) throw new AppError("This order never shipped, so its stock was already returned at refund.");
+    if (order.status !== "REFUNDED" && order.status !== "PARTIALLY_REFUNDED") throw new AppError("Record returned goods after the items have been refunded.");
+    if (!order.shippedAt) throw new AppError("This order never shipped, so refunded units went back to stock at refund.");
     let any = false;
     for (const l of lines) {
       const item = order.items.find((i) => i.id === l.orderItemId);
@@ -102,7 +102,8 @@ export async function receiveReturnedItems(orderId: string, lines: { orderItemId
       const restock = Math.max(0, Math.trunc(l.restock));
       const writeOff = Math.max(0, Math.trunc(l.writeOff));
       if (restock + writeOff === 0) continue;
-      const open = item.quantity - item.restockedQty - item.writtenOffQty;
+      // Only refunded units can come back; units refunded before shipping were restocked at refund time.
+      const open = item.refundedQty - item.restockedQty - item.writtenOffQty;
       if (restock + writeOff > open) throw new AppError(`Only ${open} unit(s) of ${item.name} are still unaccounted for.`);
       const moved = await tx.orderItem.updateMany({
         where: { id: item.id, restockedQty: item.restockedQty, writtenOffQty: item.writtenOffQty },

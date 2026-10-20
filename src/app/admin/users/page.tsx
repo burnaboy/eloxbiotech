@@ -8,31 +8,38 @@ import { Input, Select } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Empty, TBody, THead, Table, Td, Th } from "@/components/ui/table";
 import { Pager } from "@/components/admin/pager";
+import { FilterBar } from "@/components/admin/filter-bar";
+import { dateWhere, pageOf, parseRange, searchText } from "@/lib/admin-filters";
 
 const ROLES: Role[] = ["CUSTOMER", "AFFILIATE", "ADMIN", "SUPER_ADMIN"];
 const PAGE = 50;
 
-export default async function Members({ searchParams }: { searchParams: Promise<{ q?: string; role?: string; page?: string }> }) {
+export default async function Members({ searchParams }: { searchParams: Promise<{ q?: string; role?: string; page?: string; from?: string; to?: string }> }) {
   await requireAdmin("MEMBERS");
   const sp = await searchParams;
-  const page = Math.max(1, Number(sp.page) || 1);
+  const page = pageOf(sp.page);
+  const q = searchText(sp.q);
+  const joined = dateWhere(parseRange(sp.from, sp.to));
   const where: Prisma.UserWhereInput = {
+    ...(joined ? { createdAt: joined } : {}),
     ...(ROLES.includes(sp.role as Role) ? { role: sp.role as Role } : {}),
-    ...(sp.q ? { OR: [{ email: { contains: sp.q, mode: "insensitive" } }, { name: { contains: sp.q, mode: "insensitive" } }, { referralCode: { contains: sp.q.toUpperCase() } }, { phone: { contains: sp.q } }] } : {}),
+    ...(q ? { OR: [{ email: { contains: q, mode: "insensitive" } }, { name: { contains: q, mode: "insensitive" } }, { referralCode: { contains: q.toUpperCase() } }, { phone: { contains: q } }] } : {}),
   };
   const users = await prisma.user.findMany({ where, include: { sponsor: { select: { name: true } } }, orderBy: { createdAt: "desc" }, skip: (page - 1) * PAGE, take: PAGE + 1 });
   return (
     <>
       <h1 className="text-2xl font-semibold tracking-tight">Members</h1>
-      <form className="flex flex-wrap gap-2">
-        <Input name="q" defaultValue={sp.q} placeholder="Name, email, phone or code" className="max-w-xs" aria-label="Search" />
-        <Select name="role" defaultValue={sp.role ?? ""} className="max-w-40" aria-label="Role">
-          <option value="">All roles</option>
-          {ROLES.map((r) => <option key={r} value={r}>{r.replace("_", " ").toLowerCase()}</option>)}
-        </Select>
-        <Button variant="outline">Filter</Button>
-      </form>
-      {users.length === 0 ? <Empty>No members.</Empty> : (
+      <FilterBar sp={sp} search={{ placeholder: "Name, email, phone or code" }} exportReport="members">
+        <div className="space-y-1">
+          <label htmlFor="role" className="block text-xs font-medium text-muted-foreground">Role</label>
+          <Select id="role" name="role" defaultValue={sp.role ?? ""} className="w-40">
+            <option value="">All roles</option>
+            {ROLES.map((r) => <option key={r} value={r}>{r.replace("_", " ").toLowerCase()}</option>)}
+          </Select>
+        </div>
+      </FilterBar>
+      <p className="text-xs text-muted-foreground">Dates filter by join date.</p>
+      {users.length === 0 ? <Empty>No members match these filters.</Empty> : (
         <Table>
           <THead><tr><Th>Member</Th><Th>Role</Th><Th>Code</Th><Th>Sponsor</Th><Th>Joined</Th><Th>Status</Th></tr></THead>
           <TBody>
@@ -49,7 +56,7 @@ export default async function Members({ searchParams }: { searchParams: Promise<
           </TBody>
         </Table>
       )}
-      <Pager page={page} hasMore={users.length > PAGE} params={{ q: sp.q, role: sp.role }} />
+      <Pager page={page} hasMore={users.length > PAGE} params={{ q: sp.q, role: sp.role, from: sp.from, to: sp.to }} />
     </>
   );
 }

@@ -1,7 +1,8 @@
 import { notFound } from "next/navigation";
-import { requireUser } from "@/lib/session";
+import { canAccess, requireUser } from "@/lib/session";
 import { prisma } from "@/lib/db";
-import { getBrand } from "@/lib/settings";
+import { getBrand, getShopSettings } from "@/lib/settings";
+import { OrderTotals } from "@/components/order-totals";
 import { formatMoney } from "@/lib/money";
 import { formatDate } from "@/lib/utils";
 import { PrintButton } from "@/components/print-button";
@@ -11,13 +12,16 @@ export const metadata = { title: "Receipt" };
 export default async function ReceiptPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const user = await requireUser(`/orders/${id}/receipt`);
-  const isStaff = user.role === "ADMIN" || user.role === "SUPER_ADMIN";
-  const [order, brand] = await Promise.all([
-    prisma.order.findFirst({ where: { id, ...(isStaff ? {} : { userId: user.id }) }, include: { items: true, payments: { where: { status: { in: ["SUCCEEDED", "REFUNDED"] } } } } }),
+  // Staff can open any receipt only with the Orders permission.
+  const isStaff = canAccess(user, "ORDERS");
+  const [order, brand, shop] = await Promise.all([
+    prisma.order.findFirst({ where: { id, ...(isStaff ? {} : { userId: user.id }) }, include: { items: true, payments: true, refunds: { where: { status: "PROCESSED" }, orderBy: { createdAt: "asc" } } } }),
     getBrand(),
+    getShopSettings(),
   ]);
   if (!order || !order.paidAt) notFound();
   const m = (v: number) => formatMoney(v, order.currency);
+  const payment = order.payments.find((p) => p.id === order.paidPaymentId);
   return (
     <div className="container max-w-2xl py-10 print:py-0">
       <div className="space-y-6 rounded-lg border bg-card p-8 print:border-0">
@@ -31,6 +35,7 @@ export default async function ReceiptPage({ params }: { params: Promise<{ id: st
             <p>{order.number}</p>
             <p>Paid {formatDate(order.paidAt)}</p>
             {order.status === "REFUNDED" && <p className="font-semibold text-destructive">REFUNDED</p>}
+            {order.status === "PARTIALLY_REFUNDED" && <p className="font-semibold text-destructive">PARTLY REFUNDED</p>}
           </div>
         </div>
         <div className="text-sm">
@@ -45,13 +50,15 @@ export default async function ReceiptPage({ params }: { params: Promise<{ id: st
               <tr key={i.id} className="border-b"><td className="py-2">{i.name}{i.variantName ? ` (${i.variantName})` : ""} <span className="text-muted-foreground">({i.sku})</span></td><td>{i.quantity}</td><td className="text-right">{m(i.unitPriceMinor)}</td><td className="text-right">{m(i.unitPriceMinor * i.quantity)}</td></tr>
             ))}
           </tbody>
-          <tfoot>
-            <tr><td colSpan={3} className="pt-2 text-right">Subtotal</td><td className="pt-2 text-right">{m(order.subtotalMinor)}</td></tr>
-            <tr><td colSpan={3} className="text-right">Shipping</td><td className="text-right">{m(order.shippingMinor)}</td></tr>
-            <tr className="font-semibold"><td colSpan={3} className="text-right">Total paid</td><td className="text-right">{m(order.totalMinor)}</td></tr>
-          </tfoot>
         </table>
-        <p className="text-xs text-muted-foreground">Payment reference: {order.payments[0]?.providerRef ?? "—"} ({order.payments[0]?.provider ?? ""})</p>
+        <div className="ml-auto max-w-xs"><OrderTotals order={order} taxLabel={shop.taxLabel} /></div>
+        {order.refunds.length > 0 && (
+          <div className="text-sm">
+            <p className="font-medium">Refunds</p>
+            {order.refunds.map((r) => <p key={r.id}>{formatDate(r.processedAt ?? r.createdAt)}: {m(r.amountMinor)} ({r.reason})</p>)}
+          </div>
+        )}
+        <p className="text-xs text-muted-foreground">Payment reference: {payment?.providerRef ?? "—"}{payment ? ` (${payment.provider})` : ""}</p>
       </div>
       <div className="mt-4 print:hidden"><PrintButton /></div>
     </div>
