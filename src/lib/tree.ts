@@ -36,34 +36,65 @@ export async function outermostSlot(tx: Tx, start: AffiliateNode, leg: Leg) {
   throw new Error("Tree depth limit reached");
 }
 
+export interface PlaceOptions {
+  method?: "AUTO" | "SPONSOR_CHOICE" | "ADMIN";
+  actorId?: string | null;
+  /** Admin placement: put the member directly under this node, on `requestedLeg`. */
+  parentNodeId?: string;
+  note?: string;
+}
+
 /**
  * Places a new affiliate in the binary tree under their sponsor.
- * The sponsor picks a leg (or the plan default applies); the new member spills over
- * to the bottom of the outside edge of that leg.
+ * - Normal: the sponsor's chosen leg (or the plan default), spilling over to the bottom of that leg's outside edge.
+ * - Admin: an exact open slot, which must be the sponsor's own position or somewhere in the sponsor's downline.
+ * Placements are permanent (enforced by database triggers) and each one is recorded in PlacementRecord.
  * Must run inside a transaction.
  */
-export async function placeInTree(tx: Tx, userId: string, sponsorUserId: string | null, requestedLeg?: Leg | null) {
+export async function placeInTree(tx: Tx, userId: string, sponsorUserId: string | null, requestedLeg?: Leg | null, opts: PlaceOptions = {}) {
+  if (sponsorUserId && sponsorUserId === userId) throw new AppError("A member can't sponsor themselves.");
   await lockTree(tx);
   const existing = await tx.affiliateNode.findUnique({ where: { userId } });
-  if (existing) return existing;
+  if (existing) {
+    if (opts.method === "ADMIN") throw new AppError("This member already has a position. Placements can't be changed.");
+    return existing;
+  }
 
   const root = await tx.affiliateNode.findFirst({ where: { parentId: null } });
   if (!root) {
-    return tx.affiliateNode.create({ data: { userId, depth: 0, ancestorIds: [] } });
+    const node = await tx.affiliateNode.create({ data: { userId, depth: 0, ancestorIds: [] } });
+    await tx.placementRecord.create({ data: { nodeId: node.id, userId, sponsorId: sponsorUserId, method: opts.method ?? "AUTO", actorId: opts.actorId ?? null, note: "Network root" } });
+    return node;
   }
 
   let sponsorNode = sponsorUserId ? await tx.affiliateNode.findUnique({ where: { userId: sponsorUserId } }) : null;
   if (sponsorUserId && !sponsorNode) throw new AppError("Your sponsor is not an active affiliate.");
   sponsorNode ??= root;
 
-  let leg: Leg | null = requestedLeg ?? sponsorNode.defaultLeg;
-  if (!leg) {
-    const plan = await getCompPlan(tx);
-    if (plan.defaultPlacement === "WEAKER_LEG") leg = sponsorNode.rightCount < sponsorNode.leftCount ? "RIGHT" : "LEFT";
-    else leg = plan.defaultPlacement;
+  let parent: AffiliateNode;
+  let leg: Leg;
+  if (opts.method === "ADMIN") {
+    if (!opts.parentNodeId || !requestedLeg) throw new AppError("Choose a parent and a side.");
+    const p = await tx.affiliateNode.findUnique({ where: { id: opts.parentNodeId } });
+    if (!p) throw new AppError("That parent position doesn't exist.");
+    if (p.id !== sponsorNode.id && !p.ancestorIds.includes(sponsorNode.id)) {
+      throw new AppError("The new position must be in the sponsor's own downline.");
+    }
+    const taken = await tx.affiliateNode.findUnique({ where: { parentId_position: { parentId: p.id, position: requestedLeg } } });
+    if (taken) throw new AppError(`The ${requestedLeg.toLowerCase()} position under that member is already filled.`);
+    parent = p;
+    leg = requestedLeg;
+  } else {
+    let chosen: Leg | null = requestedLeg ?? sponsorNode.defaultLeg;
+    if (!chosen) {
+      const plan = await getCompPlan(tx);
+      if (plan.defaultPlacement === "WEAKER_LEG") chosen = sponsorNode.rightCount < sponsorNode.leftCount ? "RIGHT" : "LEFT";
+      else chosen = plan.defaultPlacement;
+    }
+    leg = chosen;
+    parent = await outermostSlot(tx, sponsorNode, leg);
   }
 
-  const parent = await outermostSlot(tx, sponsorNode, leg);
   let node: AffiliateNode;
   try {
     node = await tx.affiliateNode.create({
@@ -75,6 +106,13 @@ export async function placeInTree(tx: Tx, userId: string, sponsorUserId: string 
     }
     throw e;
   }
+  await tx.placementRecord.create({
+    data: {
+      nodeId: node.id, userId, sponsorId: sponsorUserId, parentId: parent.id, position: leg,
+      method: opts.method ?? (requestedLeg ? "SPONSOR_CHOICE" : "AUTO"), actorId: opts.actorId ?? null, note: opts.note ?? null,
+    },
+  });
+  await tx.user.update({ where: { id: userId }, data: { placementPending: false, requestedLeg: null } });
 
   const legs = await ancestorLegs(tx, node);
   const left = legs.filter((l) => l.leg === "LEFT").map((l) => l.ancestorId);
@@ -82,6 +120,20 @@ export async function placeInTree(tx: Tx, userId: string, sponsorUserId: string 
   if (left.length) await tx.affiliateNode.updateMany({ where: { id: { in: left } }, data: { leftCount: { increment: 1 } } });
   if (right.length) await tx.affiliateNode.updateMany({ where: { id: { in: right } }, data: { rightCount: { increment: 1 } } });
   return node;
+}
+
+/** Open slots an admin could choose for a pending member: the outside edge of each of the sponsor's legs. */
+export async function suggestedSlots(tx: Tx, sponsorUserId: string | null) {
+  const sponsorNode = sponsorUserId
+    ? await tx.affiliateNode.findUnique({ where: { userId: sponsorUserId } })
+    : await tx.affiliateNode.findFirst({ where: { parentId: null } });
+  if (!sponsorNode) return [];
+  const out: { parentId: string; leg: Leg }[] = [];
+  for (const leg of ["LEFT", "RIGHT"] as const) {
+    const p = await outermostSlot(tx, sponsorNode, leg);
+    out.push({ parentId: p.id, leg });
+  }
+  return out;
 }
 
 /**
@@ -98,6 +150,17 @@ export async function applyVolume(tx: Tx, sourceNodeId: string, orderId: string,
   for (const side of ["LEFT", "RIGHT"] as const) {
     const ids = legs.filter((l) => l.leg === side).map((l) => l.ancestorId);
     if (!ids.length) continue;
+    if (pv < 0) {
+      // A reversal larger than what's left in carry (because it was already paired) stops at zero.
+      // Record the difference so carry still reconciles against the ledger.
+      const col = side === "LEFT" ? "leftCarryPv" : "rightCarryPv";
+      const short = await tx.affiliateNode.findMany({ where: { id: { in: ids }, [col]: { lt: -pv } }, select: { id: true, leftCarryPv: true, rightCarryPv: true } });
+      if (short.length) {
+        await tx.carryMovement.createMany({
+          data: short.map((n) => ({ nodeId: n.id, leg: side, pv: -pv - (side === "LEFT" ? n.leftCarryPv : n.rightCarryPv), reason: "REVERSAL_FLOOR" as const, orderId })),
+        });
+      }
+    }
     if (side === "LEFT") {
       await tx.$executeRaw`UPDATE "AffiliateNode" SET "leftCarryPv" = GREATEST(0, "leftCarryPv" + ${pv}), "leftTotalPv" = GREATEST(0, "leftTotalPv" + ${pv}) WHERE id = ANY(${ids})`;
     } else {
@@ -105,4 +168,32 @@ export async function applyVolume(tx: Tx, sourceNodeId: string, orderId: string,
     }
     await tx.volumeEntry.createMany({ data: ids.map((nodeId) => ({ nodeId, orderId, leg: side, pv })) });
   }
+}
+
+/**
+ * Open slots an admin can choose for a pending member: the outside edge of each of the sponsor's legs,
+ * plus every free slot within the first `levels` levels under the sponsor (all inside the sponsor's downline).
+ */
+export async function openSlotsForSponsor(tx: Tx, sponsorUserId: string | null, levels = 3, limit = 30) {
+  const sponsorNode = sponsorUserId
+    ? await tx.affiliateNode.findUnique({ where: { userId: sponsorUserId } })
+    : await tx.affiliateNode.findFirst({ where: { parentId: null } });
+  if (!sponsorNode) return [];
+  const edge = await suggestedSlots(tx, sponsorUserId);
+  const near = await tx.affiliateNode.findMany({
+    where: { OR: [{ id: sponsorNode.id }, { ancestorIds: { has: sponsorNode.id }, depth: { lt: sponsorNode.depth + levels } }] },
+    select: { id: true, depth: true, children: { select: { position: true } } },
+    orderBy: { depth: "asc" },
+  });
+  const out = new Map<string, { parentId: string; leg: Leg; outerEdge: boolean }>();
+  for (const s of edge) out.set(`${s.parentId}:${s.leg}`, { ...s, outerEdge: true });
+  for (const n of near) {
+    for (const leg of ["LEFT", "RIGHT"] as const) {
+      if (!n.children.some((c) => c.position === leg) && out.size < limit) {
+        const k = `${n.id}:${leg}`;
+        if (!out.has(k)) out.set(k, { parentId: n.id, leg, outerEdge: false });
+      }
+    }
+  }
+  return [...out.values()];
 }

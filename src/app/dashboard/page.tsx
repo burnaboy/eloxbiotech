@@ -14,6 +14,11 @@ import { Badge } from "@/components/ui/badge";
 import { Select } from "@/components/ui/input";
 import { Empty } from "@/components/ui/table";
 import { setDefaultLegAction } from "./actions";
+import { volumeSummary } from "@/lib/volume";
+import { VolumeTable } from "@/components/volume-table";
+import { PendingPlacement } from "@/components/pending-placement";
+
+const placementLabel = { AUTO: "automatic", SPONSOR_CHOICE: "side chosen by sponsor", ADMIN: "assigned by an administrator" } as const;
 
 export const metadata = { title: "Dashboard" };
 
@@ -34,16 +39,26 @@ export default async function Dashboard() {
     );
   }
   const [node, brand, plan, wallet, recent] = await Promise.all([
-    prisma.affiliateNode.findUniqueOrThrow({ where: { userId: user.id } }),
+    prisma.affiliateNode.findUnique({ where: { userId: user.id } }),
     getBrand(),
     getCompPlan(),
     walletBalance(user.id),
     prisma.commission.findMany({ where: { userId: user.id }, orderBy: { createdAt: "desc" }, take: 5 }),
   ]);
+  if (!node) {
+    return (
+      <>
+        <h1 className="text-2xl font-semibold tracking-tight">Welcome, {user.name.split(" ")[0]}</h1>
+        <PendingPlacement requestedLeg={user.requestedLeg} />
+      </>
+    );
+  }
   const qualified = await isQualified(prisma, node, plan);
-  const [sponsor, parent] = await Promise.all([
+  const [sponsor, parent, volume, placement] = await Promise.all([
     user.sponsorId ? prisma.user.findUnique({ where: { id: user.sponsorId }, select: { name: true, referralCode: true } }) : null,
     node.parentId ? prisma.affiliateNode.findUnique({ where: { id: node.parentId }, include: { user: { select: { name: true } } } }) : null,
+    volumeSummary(node),
+    prisma.placementRecord.findUnique({ where: { nodeId: node.id } }),
   ]);
   const m = (v: number) => formatMoney(v, brand.currency);
   const base = process.env.APP_URL ?? "";
@@ -64,6 +79,7 @@ export default async function Dashboard() {
         <p><span className="text-muted-foreground">Placed under:</span> {parent ? parent.user.name : "Top of network"}</p>
         <p><span className="text-muted-foreground">Side:</span> {node.position?.toLowerCase() ?? "—"}</p>
         <p><span className="text-muted-foreground">Level:</span> {node.depth}</p>
+        {placement && <p><span className="text-muted-foreground">Placed:</span> {formatDate(placement.createdAt)} ({placementLabel[placement.method]})</p>}
         <p><span className="text-muted-foreground">Pending commissions:</span> {m(wallet.pendingMinor)}</p>
       </Card>
       {!qualified && (
@@ -75,6 +91,13 @@ export default async function Dashboard() {
           Volume keeps building in the meantime. <Link href="/compensation" className="text-primary underline">See the plan</Link>
         </Card>
       )}
+      <Card>
+        <CardHeader>
+          <CardTitle>Volume</CardTitle>
+          <CardDescription>PV is counted only from paid product orders, and only after the refund window. Joining, recruiting or filling a position adds no volume.</CardDescription>
+        </CardHeader>
+        <CardContent><VolumeTable v={volume} /></CardContent>
+      </Card>
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>
           <CardHeader>

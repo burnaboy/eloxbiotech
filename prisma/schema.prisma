@@ -114,6 +114,9 @@ model User {
   role          Role       @default(CUSTOMER)
   status        UserStatus @default(ACTIVE)
   referralCode  String     @unique
+  /// Affiliate waiting for an administrator to choose their position (approval placement mode).
+  placementPending Boolean @default(false)
+  requestedLeg  Leg?
   signupIp      String?
   adminPermissions AdminPermission[]
   /// TOTP secret, encrypted with APP_ENCRYPTION_KEY.
@@ -182,6 +185,7 @@ model AffiliateNode {
   ancestorIds String[]
   /// Preferred leg for new referrals when the link doesn't specify one. Null = weaker leg.
   defaultLeg  Leg?
+  placementRecord PlacementRecord?
 
   personalPv  Int @default(0)
   leftCarryPv Int @default(0)
@@ -194,6 +198,7 @@ model AffiliateNode {
   createdAt DateTime @default(now())
 
   volumes VolumeEntry[]
+  carryMovements CarryMovement[]
 
   @@unique([parentId, position])
   @@index([parentId])
@@ -213,6 +218,29 @@ model VolumeEntry {
 
   @@index([nodeId])
   @@index([orderId])
+}
+
+/// Changes to leg carry that don't come from an order: PV consumed or flushed by a binary run,
+/// or a reversal that was larger than the remaining carry. Carry = sum(VolumeEntry leg) + sum(CarryMovement).
+model CarryMovement {
+  id        String        @id @default(cuid())
+  nodeId    String
+  node      AffiliateNode @relation(fields: [nodeId], references: [id])
+  leg       Leg
+  pv        Int
+  reason    CarryReason
+  runId     String?
+  run       BinaryRun?    @relation(fields: [runId], references: [id])
+  orderId   String?
+  createdAt DateTime      @default(now())
+
+  @@index([nodeId])
+  @@index([runId])
+}
+
+enum CarryReason {
+  BINARY_RUN
+  REVERSAL_FLOOR
 }
 
 model Category {
@@ -404,6 +432,7 @@ model BinaryRun {
   actorId     String?
 
   commissions Commission[]
+  carryMovements CarryMovement[]
 }
 
 model Payout {
@@ -574,4 +603,25 @@ model EmailVerificationToken {
   createdAt DateTime  @default(now())
 
   @@index([userId])
+}
+
+enum PlacementMethod {
+  AUTO
+  SPONSOR_CHOICE
+  ADMIN
+}
+
+/// Immutable record of how and by whom each member was placed. Never updated or deleted.
+model PlacementRecord {
+  id         String          @id @default(cuid())
+  nodeId     String          @unique
+  node       AffiliateNode   @relation(fields: [nodeId], references: [id])
+  userId     String
+  sponsorId  String?
+  parentId   String?
+  position   Leg?
+  method     PlacementMethod
+  actorId    String?
+  note       String?
+  createdAt  DateTime        @default(now())
 }

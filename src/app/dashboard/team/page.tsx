@@ -8,14 +8,15 @@ export const metadata = { title: "My referrals" };
 
 export default async function TeamPage() {
   const user = await requireAffiliate();
-  const me = await prisma.affiliateNode.findUniqueOrThrow({ where: { userId: user.id } });
+  const me = await prisma.affiliateNode.findUnique({ where: { userId: user.id } });
   const [refs, children] = await Promise.all([
     prisma.user.findMany({ where: { sponsorId: user.id }, include: { node: true }, orderBy: { createdAt: "desc" } }),
-    prisma.affiliateNode.findMany({ where: { parentId: me.id }, select: { id: true, position: true } }),
+    me ? prisma.affiliateNode.findMany({ where: { parentId: me.id }, select: { id: true, position: true } }) : [],
   ]);
   const childLeg = new Map(children.map((c) => [c.id, c.position]));
   const sideOf = (ancestorIds: string[], id: string) => {
     const path = [...ancestorIds, id];
+    if (!me) return null;
     return childLeg.get(path[path.indexOf(me.id) + 1]) ?? null;
   };
   return (
@@ -30,7 +31,7 @@ export default async function TeamPage() {
               <tr key={r.id}>
                 <Td className="font-medium">{r.name}</Td>
                 <Td><Badge tone={r.role === "CUSTOMER" ? "neutral" : "primary"}>{r.role === "CUSTOMER" ? "customer" : "affiliate"}</Badge></Td>
-                <Td>{r.node ? (sideOf(r.node.ancestorIds, r.node.id)?.toLowerCase() ?? "—") : "—"}</Td>
+                <Td>{r.node ? (sideOf(r.node.ancestorIds, r.node.id)?.toLowerCase() ?? "—") : r.placementPending ? "awaiting placement" : "—"}</Td>
                 <Td>{formatDate(r.createdAt)}</Td>
               </tr>
             ))}

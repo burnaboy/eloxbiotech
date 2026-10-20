@@ -42,6 +42,25 @@ test("super admin must set up two-step verification, then can ship an order and 
   const c = await db.commission.findFirstOrThrow({ where: { orderId: order.id } });
   expect(c.status).toBe("REVERSED");
 
+  // The ledger check finds nothing wrong after a refund.
+  await page.goto("/admin/risk");
+  await page.getByRole("button", { name: "Run check now" }).click();
+  await expect(page.getByText(/match the ledger/)).toBeVisible();
+
+  // A member waiting for approval gets placed from the queue (the code above is still fresh).
+  const ada = await db.user.findUniqueOrThrow({ where: { email: "ada@demo.local" } });
+  const pending = await db.user.create({
+    data: { email: "pending@demo.local", name: "Pending Demo", passwordHash: "x", referralCode: "PENDING1", role: "AFFILIATE", sponsorId: ada.id, placementPending: true, requestedLeg: "RIGHT", emailVerifiedAt: new Date() },
+  });
+  await page.goto("/admin/network");
+  await expect(page.getByText("Waiting for placement")).toBeVisible();
+  await page.getByRole("button", { name: "Place" }).click();
+  await expect(page.getByText("Member placed")).toBeVisible();
+  const rec = await db.placementRecord.findFirstOrThrow({ where: { userId: pending.id } });
+  expect(rec.method).toBe("ADMIN");
+  expect(rec.position).toBe("RIGHT");
+  await expect(page.getByRole("cell", { name: "Pending Demo" })).toBeVisible();
+
   // Every admin page renders.
   for (const p of ["orders", "returns", "products", "categories", "testimonials", "users", "network", "commissions", "payouts", "support", "risk", "settings", "audit", "team", "operations"]) {
     const res = await page.goto(`/admin/${p}`);

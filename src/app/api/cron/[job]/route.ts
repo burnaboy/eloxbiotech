@@ -4,6 +4,7 @@ import { expireStaleOrders, reconcilePendingPayments } from "@/lib/orders";
 import { matureOrders, runBinary } from "@/lib/commissions";
 import { deliverPendingEmails } from "@/lib/email";
 import { prisma } from "@/lib/db";
+import { reconcileVolume } from "@/lib/volume";
 
 /**
  * Scheduled jobs. Call with header "Authorization: Bearer $CRON_SECRET".
@@ -12,6 +13,7 @@ import { prisma } from "@/lib/db";
  * - mature-orders: hourly
  * - binary: daily just after midnight Lagos time (pays the previous day)
  * - send-emails: every minute
+ * - reconcile-volume: daily (checks network totals against the sales ledger, reports only)
  * - cleanup: daily (expired sessions, old sign-in attempts)
  */
 function authorized(req: NextRequest) {
@@ -45,6 +47,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ job
           prisma.loginAttempt.deleteMany({ where: { createdAt: { lt: new Date(Date.now() - 30 * 864e5) } } }),
         ]);
         return NextResponse.json({ sessions: s.count, loginAttempts: a.count });
+      }
+      case "reconcile-volume": {
+        const r = await reconcileVolume(null);
+        if (r.issueCount > 0) console.error(`volume reconciliation found ${r.issueCount} issue(s)`);
+        return NextResponse.json({ nodes: r.nodes, orders: r.orders, issues: r.issueCount });
       }
       case "mature-orders":
         return NextResponse.json({ matured: await matureOrders() });

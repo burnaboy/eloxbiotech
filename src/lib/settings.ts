@@ -28,6 +28,8 @@ export const compPlanSchema = z.object({
   minPersonalPv: z.number().int().min(0),
   /** How new members are placed when the referral link doesn't name a leg. */
   defaultPlacement: z.enum(["WEAKER_LEG", "LEFT", "RIGHT"]),
+  /** AUTO places new affiliates immediately; ADMIN_APPROVAL queues them for an administrator to place. */
+  placementMode: z.enum(["AUTO", "ADMIN_APPROVAL"]),
 });
 export type CompPlan = z.infer<typeof compPlanSchema>;
 
@@ -43,6 +45,7 @@ export const DEFAULT_COMP_PLAN: CompPlan = {
   requireDirectOnEachLeg: true,
   minPersonalPv: 0,
   defaultPlacement: "WEAKER_LEG",
+  placementMode: "AUTO",
 };
 
 export const shopSettingsSchema = z.object({

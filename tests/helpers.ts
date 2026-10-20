@@ -2,12 +2,29 @@ import { prisma } from "@/lib/db";
 import { registerUser } from "@/lib/users";
 import { DEFAULT_COMP_PLAN, saveSetting, type CompPlan } from "@/lib/settings";
 import { hashPassword } from "@/lib/auth";
+import { expect } from "vitest";
+import { addToCart, applyPaymentEvent, createOrderFromCart, startPayment } from "@/lib/orders";
+import { testProvider, buildTestEvent } from "@/lib/payments/test-provider";
+
+export async function buyAndPay(userId: string, productId: string, qty = 1) {
+  await addToCart(userId, productId, qty);
+  const order = await createOrderFromCart(userId, address);
+  await startPayment(order.id, userId);
+  const pay = await prisma.payment.findFirstOrThrow({ where: { orderId: order.id } });
+  const { body, signature } = buildTestEvent({ type: "payment.succeeded", providerRef: pay.providerRef, amountMinor: order.totalMinor, currency: "NGN" });
+  const event = await testProvider.parseWebhook(body, new Headers({ "x-test-signature": signature }));
+  const res = await applyPaymentEvent("test", event!);
+  expect(res.status).toBe("paid");
+  return order;
+}
+
+export const later = (days: number) => new Date(Date.now() + days * 864e5);
 
 export async function resetDb() {
   const tables = [
     "EmailVerificationToken", "PasswordResetToken", "EmailOutbox", "ContactMessage", "Testimonial", "SupportMessage", "SupportTicket",
     "ReturnRequest", "Notification", "Address", "Category",
-    "AuditLog", "Setting", "Payout", "Commission", "BinaryRun", "WebhookEvent", "Payment", "VolumeEntry",
+    "AuditLog", "Setting", "CarryMovement", "PlacementRecord", "Payout", "Commission", "BinaryRun", "WebhookEvent", "Payment", "VolumeEntry",
     "OrderItem", "Order", "CartItem", "InventoryMovement", "Product", "AffiliateNode", "LoginAttempt", "Session", "User",
   ];
   await prisma.$executeRawUnsafe(`TRUNCATE ${tables.map((t) => `"${t}"`).join(", ")} CASCADE`);

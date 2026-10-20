@@ -17,6 +17,8 @@ import { resolveReturn } from "@/lib/returns";
 import { closeTicket, replyTicket } from "@/lib/support";
 import { resetMfa } from "@/lib/mfa";
 import { notify } from "@/lib/notify";
+import { placeInTree } from "@/lib/tree";
+import { reconcileVolume } from "@/lib/volume";
 import {
   brandSchema, compPlanSchema, getBrand, getCompPlan, getOps, getShopSettings, opsSchema, saveSetting, shopSettingsSchema,
 } from "@/lib/settings";
@@ -311,10 +313,38 @@ export async function saveCompPlanAction(fd: FormData) {
       pairValueMinor: toMinor(str(fd, "pairValue")), dailyCapMinor: toMinor(str(fd, "dailyCap")), carryForward: fd.get("carryForward") === "on",
       maxCarryPv: num(fd, "maxCarryPv"), holdDays: num(fd, "holdDays"), requireDirectOnEachLeg: fd.get("requireDirectOnEachLeg") === "on",
       minPersonalPv: num(fd, "minPersonalPv"), defaultPlacement: str(fd, "defaultPlacement"),
+      placementMode: str(fd, "placementMode"),
     });
     await saveSetting("compPlan", v);
     await audit("settings.compPlan", "Setting", "compPlan", adminId, { before, after: v, privileged: true });
     return "Compensation plan saved. It applies to new orders and the next binary run.";
+  });
+}
+
+// ---------- Network ----------
+
+/** Places a member who is waiting for approval. Needs NETWORK permission and a fresh authenticator code. */
+export async function placeMemberAction(userId: string, fd: FormData) {
+  await act("/admin/network", { perm: "NETWORK", stepUp: true }, async (adminId) => {
+    const [parentNodeId, leg] = str(fd, "slot").split(":");
+    if (!parentNodeId || (leg !== "LEFT" && leg !== "RIGHT")) throw new AppError("Choose an open position.");
+    const note = str(fd, "note").slice(0, 300) || null;
+    await prisma.$transaction(async (tx) => {
+      const u = await tx.user.findUniqueOrThrow({ where: { id: userId } });
+      if (!u.placementPending) throw new AppError("This member isn't waiting for placement.");
+      if (u.role === "CUSTOMER") throw new AppError("Only affiliates are placed in the network.");
+      const node = await placeInTree(tx, userId, u.sponsorId, leg, { method: "ADMIN", actorId: adminId, parentNodeId, note: note ?? undefined });
+      await audit("network.place", "User", userId, adminId, { nodeId: node.id, parentNodeId, leg, note }, tx);
+      await notify(userId, "You've been placed in the network", `Your position is on the ${leg.toLowerCase()} side. This doesn't earn anything by itself: commissions come only from completed product sales.`, "/dashboard", tx, "account");
+    });
+    return "Member placed";
+  });
+}
+
+export async function reconcileVolumeAction() {
+  await act("/admin/risk", { perm: "RISK" }, async (adminId) => {
+    const r = await reconcileVolume(adminId);
+    return r.issueCount ? `Found ${r.issueCount} mismatch(es). See the network ledger check below.` : `All ${r.nodes} positions and ${r.orders} orders match the ledger.`;
   });
 }
 

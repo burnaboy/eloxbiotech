@@ -54,9 +54,17 @@ test("an affiliate sees referral links, the tree and the pending commission", as
   await signIn(page, "ada@demo.local", "Password123");
   await page.goto("/dashboard");
   await expect(page.getByText("Your referral links")).toBeVisible();
+  await expect(page.getByRole("cell", { name: /Currently qualifying/ })).toBeVisible();
   await page.getByRole("link", { name: "Binary tree" }).click();
   await expect(page.getByText("Bayo Demo")).toBeVisible();
   await expect(page.getByText("Chi Demo")).toBeVisible();
+  await page.getByLabel("Search members").fill("chi");
+  await page.getByRole("button", { name: "Search" }).click();
+  await page.getByRole("list", { name: "Search results" }).getByRole("link", { name: /Chi Demo/ }).click();
+  await expect(page.getByRole("link", { name: "Back to me" })).toBeVisible();
+  // Searching never reveals people outside your own downline.
+  await page.goto("/dashboard/tree?q=Company");
+  await expect(page.getByText("No members match")).toBeVisible();
   await page.goto("/dashboard/commissions?status=PENDING");
   await expect(page.getByRole("cell", { name: "pending" }).first()).toBeVisible();
   // Affiliates must not reach the admin area.

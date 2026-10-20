@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { UserRound } from "lucide-react";
+import { ChevronDown, UserRound } from "lucide-react";
 import type { TreeNodeView } from "@/lib/tree-view";
 import { cn } from "@/lib/utils";
 
@@ -7,6 +7,7 @@ function NodeCard({ n, href, root }: { n: TreeNodeView; href: string; root?: boo
   return (
     <Link
       href={href}
+      aria-label={`${n.name}, ${n.referralCode}${n.hasMore ? ", open to see members below" : ""}`}
       className={cn(
         "flex w-36 flex-col items-center rounded-lg border bg-card p-2 text-center text-xs shadow-sm hover:border-primary",
         root && "border-primary ring-1 ring-primary",
@@ -19,6 +20,7 @@ function NodeCard({ n, href, root }: { n: TreeNodeView; href: string; root?: boo
       <span className="mt-1 tabular-nums text-muted-foreground">
         L {n.leftCount} · {n.leftCarryPv} PV | R {n.rightCount} · {n.rightCarryPv} PV
       </span>
+      {n.hasMore && <span className="mt-1 inline-flex items-center gap-0.5 font-medium text-primary"><ChevronDown className="h-3 w-3" aria-hidden />{n.leftCount + n.rightCount} below</span>}
     </Link>
   );
 }

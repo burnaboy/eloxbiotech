@@ -2,11 +2,14 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireAdmin, canAccess } from "@/lib/session";
 import { prisma } from "@/lib/db";
+import { volumeSummary } from "@/lib/volume";
+import { VolumeTable } from "@/components/volume-table";
 import { getBrand } from "@/lib/settings";
 import { walletBalance } from "@/lib/wallet";
 import { formatMoney } from "@/lib/money";
 import { formatDate } from "@/lib/utils";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Alert } from "@/components/ui/alert";
 import { Badge, StatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Stat } from "@/components/stat";
@@ -18,12 +21,19 @@ export default async function Member({ params, searchParams }: { params: Promise
   const { id } = await params;
   const u = await prisma.user.findUnique({ where: { id }, include: { node: true, sponsor: true, _count: { select: { referrals: true, orders: true } } } });
   if (!u) notFound();
-  const [brand, wallet, orders, sessions, sameIp] = await Promise.all([
+  const [brand, wallet, orders, sessions, sameIp, placement, volume] = await Promise.all([
     getBrand(),
     walletBalance(u.id),
     prisma.order.findMany({ where: { userId: u.id }, orderBy: { createdAt: "desc" }, take: 10 }),
     prisma.session.findMany({ where: { userId: u.id, expiresAt: { gt: new Date() } }, orderBy: { createdAt: "desc" }, take: 10 }),
     u.signupIp ? prisma.user.findMany({ where: { signupIp: u.signupIp, NOT: { id: u.id } }, select: { id: true, name: true, email: true }, take: 10 }) : [],
+    prisma.placementRecord.findFirst({ where: { userId: u.id } }),
+    u.node ? volumeSummary(u.node) : null,
+  ]);
+  const [placedUnder, placedBy, originalSponsor] = await Promise.all([
+    placement?.parentId ? prisma.affiliateNode.findUnique({ where: { id: placement.parentId }, select: { user: { select: { id: true, name: true } } } }) : null,
+    placement?.actorId ? prisma.user.findUnique({ where: { id: placement.actorId }, select: { name: true } }) : null,
+    placement?.sponsorId ? prisma.user.findUnique({ where: { id: placement.sponsorId }, select: { id: true, name: true } }) : null,
   ]);
   const m = (v: number) => formatMoney(v, brand.currency);
   return (
@@ -45,6 +55,28 @@ export default async function Member({ params, searchParams }: { params: Promise
           <Stat label="Right leg" value={`${u.node.rightCarryPv} PV`} hint={`${u.node.rightCount} members · ${u.node.rightTotalPv} PV all time`} />
           <Stat label="Placement" value={u.node.position?.toLowerCase() ?? "root"} hint={canAccess(admin, "NETWORK") ? <Link className="text-primary underline" href={`/admin/network?n=${u.node.id}`}>View in network</Link> : `level ${u.node.depth}`} />
         </div>
+      )}
+      {u.placementPending && (
+        <Alert>Waiting for an administrator to assign a network position{u.requestedLeg ? ` (asked for ${u.requestedLeg.toLowerCase()})` : ""}. <Link className="text-primary underline" href="/admin/network">Open the placement queue</Link></Alert>
+      )}
+      {placement && (
+        <Card>
+          <CardHeader><CardTitle>Placement record</CardTitle><CardDescription>Recorded when the position was created. It can't be edited.</CardDescription></CardHeader>
+          <CardContent className="grid gap-x-8 gap-y-1 text-sm sm:grid-cols-2">
+            <p><span className="text-muted-foreground">Placed:</span> {formatDate(placement.createdAt)}</p>
+            <p><span className="text-muted-foreground">Method:</span> {placement.method.replace("_", " ").toLowerCase()}</p>
+            <p><span className="text-muted-foreground">Sponsor at sign-up:</span> {originalSponsor ? <Link className="text-primary underline" href={`/admin/users/${originalSponsor.id}`}>{originalSponsor.name}</Link> : "none"}</p>
+            <p><span className="text-muted-foreground">Placed under:</span> {placedUnder ? <Link className="text-primary underline" href={`/admin/users/${placedUnder.user.id}`}>{placedUnder.user.name}</Link> : "network root"}{placement.position ? `, ${placement.position.toLowerCase()} side` : ""}</p>
+            <p><span className="text-muted-foreground">By:</span> {placedBy?.name ?? "system"}</p>
+            {placement.note && <p><span className="text-muted-foreground">Note:</span> {placement.note}</p>}
+          </CardContent>
+        </Card>
+      )}
+      {volume && (
+        <Card>
+          <CardHeader><CardTitle>Volume</CardTitle></CardHeader>
+          <CardContent><VolumeTable v={volume} /></CardContent>
+        </Card>
       )}
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>

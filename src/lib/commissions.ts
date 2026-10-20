@@ -89,7 +89,12 @@ export async function reverseOrderCommissions(tx: Tx, orderId: string, actorId: 
     await notify(c.userId, "Commission reversed", `The commission on a referred order was reversed (${reason.toLowerCase()}).`, "/dashboard/commissions", tx, "commission");
   }
   const order = await tx.order.findUniqueOrThrow({ where: { id: orderId } });
-  if (order.commissionedAt && order.volumeNodeId && order.totalPv > 0) await applyVolume(tx, order.volumeNodeId, orderId, -order.totalPv);
+  if (order.volumeNodeId) {
+    // Only take back volume that is actually still credited, so a refund followed by a chargeback can't reverse twice.
+    const credited = await tx.volumeEntry.aggregate({ where: { orderId, nodeId: order.volumeNodeId, leg: null }, _sum: { pv: true } });
+    const net = credited._sum.pv ?? 0;
+    if (net > 0) await applyVolume(tx, order.volumeNodeId, orderId, -net);
+  }
   await audit("commission.reverse", "Order", orderId, actorId, { count: rows.length, reason }, tx);
 }
 
@@ -165,6 +170,11 @@ export async function runBinary(periodKey: string, actorId: string | null) {
         const r = computePairing({ leftPv: node.leftCarryPv, rightPv: node.rightCarryPv, qualified }, plan);
         if (r.leftCarryPv !== node.leftCarryPv || r.rightCarryPv !== node.rightCarryPv) {
           await tx.affiliateNode.update({ where: { id: node.id }, data: { leftCarryPv: r.leftCarryPv, rightCarryPv: r.rightCarryPv } });
+          const moves = [
+            { leg: "LEFT" as const, pv: r.leftCarryPv - node.leftCarryPv },
+            { leg: "RIGHT" as const, pv: r.rightCarryPv - node.rightCarryPv },
+          ].filter((m) => m.pv !== 0);
+          await tx.carryMovement.createMany({ data: moves.map((m) => ({ ...m, nodeId: node.id, reason: "BINARY_RUN" as const, runId: run.id })) });
         }
         if (r.pairs > 0) {
           pairsPaid += r.pairs;

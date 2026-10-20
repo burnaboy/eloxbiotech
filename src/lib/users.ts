@@ -1,7 +1,8 @@
 import { Prisma, type Leg } from "@prisma/client";
 import { z } from "zod";
 import { hashPassword, randomCode } from "./auth";
-import { prisma } from "./db";
+import { prisma, type Tx } from "./db";
+import { getCompPlan } from "./settings";
 import { AppError } from "./errors";
 import { placeInTree } from "./tree";
 import { audit } from "./audit";
@@ -53,7 +54,7 @@ export async function registerUser(raw: RegisterInput, meta: { ip?: string } = {
             role: input.joinAsAffiliate ? "AFFILIATE" : "CUSTOMER",
           },
         });
-        if (input.joinAsAffiliate) await placeInTree(tx, user.id, sponsor?.id ?? null, input.leg ?? null);
+        if (input.joinAsAffiliate) await placeOrQueue(tx, user.id, sponsor?.id ?? null, input.leg ?? null);
         await audit("user.register", "User", user.id, user.id, { sponsorId: sponsor?.id ?? null, affiliate: input.joinAsAffiliate }, tx);
         return user;
       });
@@ -69,14 +70,24 @@ export async function registerUser(raw: RegisterInput, meta: { ip?: string } = {
   throw new AppError("Could not create the account. Please try again.");
 }
 
+/** Places immediately, or queues for an administrator when the plan uses approval placement. */
+async function placeOrQueue(tx: Tx, userId: string, sponsorId: string | null, leg: Leg | null) {
+  const plan = await getCompPlan(tx);
+  if (plan.placementMode === "ADMIN_APPROVAL" && (await tx.affiliateNode.count()) > 0) {
+    await tx.user.update({ where: { id: userId }, data: { placementPending: true, requestedLeg: leg } });
+    return null;
+  }
+  return placeInTree(tx, userId, sponsorId, leg);
+}
+
 /** Turns a customer into an affiliate and places them under their existing sponsor. */
 export async function becomeAffiliate(userId: string, leg?: Leg | null) {
   return prisma.$transaction(async (tx) => {
     const user = await tx.user.findUniqueOrThrow({ where: { id: userId } });
     if (user.role !== "CUSTOMER") throw new AppError("You are already an affiliate.");
-    const node = await placeInTree(tx, user.id, user.sponsorId, leg ?? null);
     await tx.user.update({ where: { id: userId }, data: { role: "AFFILIATE" } });
-    await audit("user.becomeAffiliate", "User", userId, userId, { nodeId: node.id }, tx);
+    const node = await placeOrQueue(tx, user.id, user.sponsorId, leg ?? null);
+    await audit("user.becomeAffiliate", "User", userId, userId, { nodeId: node?.id ?? null, pending: !node }, tx);
     return node;
   });
 }

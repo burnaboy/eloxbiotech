@@ -82,6 +82,7 @@ export default async function Settings({ searchParams }: { searchParams: Promise
               <F id="holdDays" label="Hold before approval (days)"><Input id="holdDays" name="holdDays" inputMode="numeric" defaultValue={p.holdDays} /></F>
               <F id="minPersonalPv" label="Personal PV to qualify"><Input id="minPersonalPv" name="minPersonalPv" inputMode="numeric" defaultValue={p.minPersonalPv} /></F>
               <F id="defaultPlacement" label="Default placement"><Select id="defaultPlacement" name="defaultPlacement" defaultValue={p.defaultPlacement}><option value="WEAKER_LEG">Weaker side</option><option value="LEFT">Left</option><option value="RIGHT">Right</option></Select></F>
+              <F id="placementMode" label="Placement of new affiliates" hint="Approval: an admin chooses each new affiliate's position"><Select id="placementMode" name="placementMode" defaultValue={p.placementMode}><option value="AUTO">Automatic</option><option value="ADMIN_APPROVAL">Admin approval</option></Select></F>
               <label className="flex items-center gap-2 text-sm"><input type="checkbox" name="carryForward" defaultChecked={p.carryForward} className="h-4 w-4" /> Carry unmatched volume forward</label>
               <label className="flex items-center gap-2 text-sm sm:col-span-2"><input type="checkbox" name="requireDirectOnEachLeg" defaultChecked={p.requireDirectOnEachLeg} className="h-4 w-4" /> Require a personal referral on each side to earn team commission</label>
               <div><Button>Save plan</Button></div>

@@ -10,6 +10,36 @@ import { Badge } from "@/components/ui/badge";
 import { Flash } from "@/components/flash";
 import { reconcilePendingPayments } from "@/lib/orders";
 import { redirect } from "next/navigation";
+import type { AuditLog } from "@prisma/client";
+import type { ReconcileIssue } from "@/lib/volume";
+import { reconcileVolumeAction } from "../actions";
+
+function LedgerCheck({ last }: { last: AuditLog | null }) {
+  const d = last?.data as { nodes?: number; orders?: number; issueCount?: number; issues?: ReconcileIssue[] } | null;
+  const count = d?.issueCount ?? 0;
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          Network ledger check {last ? <Badge tone={count ? "danger" : "success"}>{count ? `${count} mismatch(es)` : "all match"}</Badge> : <Badge>not run yet</Badge>}
+        </CardTitle>
+        <CardDescription>
+          Recomputes every position's volume, carry and member counts from the order and volume ledgers, and checks refunded orders have no live commissions.
+          It reports only and never changes balances. Runs daily; {last ? `last run ${formatDate(last.createdAt)} over ${d?.nodes ?? 0} positions and ${d?.orders ?? 0} orders.` : "it hasn't run yet."}
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-2 text-sm">
+        <form action={reconcileVolumeAction}><Button size="sm" variant="outline">Run check now</Button></form>
+        {count > 0 && (
+          <ul className="space-y-1">
+            {d?.issues?.map((i, k) => <li key={k}><Badge tone="warning">{i.kind}</Badge> <span className="font-medium">{i.ref}</span> · {i.detail}</li>)}
+            {count > (d?.issues?.length ?? 0) && <li className="text-muted-foreground">…and {count - (d?.issues?.length ?? 0)} more.</li>}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 async function reconcileNow() {
   "use server";
@@ -35,7 +65,8 @@ export default async function Risk({ searchParams }: { searchParams: Promise<{ o
   const brand = await getBrand();
   const m = (v: number) => formatMoney(v, brand.currency);
   const hourAgo = new Date(Date.now() - 3600e3);
-  const [flagged, stalePayments, disputes, sharedIps, bigPayouts, selfBuys, failedLogins] = await Promise.all([
+  const [lastCheck, flagged, stalePayments, disputes, sharedIps, bigPayouts, selfBuys, failedLogins] = await Promise.all([
+    prisma.auditLog.findFirst({ where: { action: "volume.reconcile" }, orderBy: { createdAt: "desc" } }),
     prisma.auditLog.findMany({ where: { action: { in: ["payment.amountMismatch", "payment.needsReview"] } }, orderBy: { createdAt: "desc" }, take: 50 }),
     prisma.payment.findMany({ where: { status: "PENDING", createdAt: { lt: hourAgo }, order: { status: "PENDING_PAYMENT" } }, include: { order: true }, take: 50 }),
     prisma.order.findMany({ where: { disputedAt: { not: null } }, take: 50 }),
@@ -52,6 +83,7 @@ export default async function Risk({ searchParams }: { searchParams: Promise<{ o
     <>
       <h1 className="text-2xl font-semibold tracking-tight">Risk & reconciliation</h1>
       <Flash sp={await searchParams} />
+      <LedgerCheck last={lastCheck} />
       <div className="grid gap-6 lg:grid-cols-2">
         <Section title="Payments needing review" desc="Amount mismatches, or payments that arrived after an order expired. Refund or fulfil manually." count={flagged.length}>
           {flagged.map((f) => <p key={f.id}>{formatDate(f.createdAt)} · {f.action} · <Link className="text-primary underline" href={`/admin/orders/${f.entityId}`}>order</Link></p>)}
