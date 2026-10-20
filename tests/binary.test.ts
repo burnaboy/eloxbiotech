@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { computePairing } from "@/lib/binary";
 import { DEFAULT_COMP_PLAN, type CompPlan } from "@/lib/settings";
 
-const plan = (p: Partial<CompPlan> = {}): CompPlan => ({ ...DEFAULT_COMP_PLAN, dailyCapMinor: 0, ...p });
+const plan = (p: Partial<CompPlan> = {}): CompPlan => ({ ...DEFAULT_COMP_PLAN, pairValueMinor: 1000, dailyCapMinor: 0, ...p });
 
 describe("computePairing", () => {
   it("pairs 1:1 and carries the remainder", () => {

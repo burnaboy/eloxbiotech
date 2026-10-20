@@ -233,6 +233,8 @@ model Order {
   trackingRef String?
 
   paidAt          DateTime?
+  /// Set while a chargeback is open; such orders don't earn commissions until it's resolved.
+  disputedAt      DateTime?
   /// Set when the refund-hold window passes and commissions + volume are credited.
   commissionedAt  DateTime?
   expiresAt       DateTime

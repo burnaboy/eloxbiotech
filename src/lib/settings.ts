@@ -35,8 +35,8 @@ export const DEFAULT_COMP_PLAN: CompPlan = {
   directBonusPercent: 10,
   pairUnitPv: 100,
   pairingRatio: "1:1",
-  pairValueMinor: 1000,
-  dailyCapMinor: 50000,
+  pairValueMinor: 200000,
+  dailyCapMinor: 10000000,
   carryForward: true,
   maxCarryPv: 0,
   holdDays: 14,
@@ -53,11 +53,38 @@ export const shopSettingsSchema = z.object({
 });
 export type ShopSettings = z.infer<typeof shopSettingsSchema>;
 export const DEFAULT_SHOP: ShopSettings = {
-  flatShippingMinor: 500,
-  freeShippingOverMinor: 10000,
-  minPayoutMinor: 2000,
+  flatShippingMinor: 250000,
+  freeShippingOverMinor: 5000000,
+  minPayoutMinor: 500000,
   orderExpiryMinutes: 60,
 };
+
+export const brandSchema = z.object({
+  companyName: z.string().trim().min(1).max(80),
+  tagline: z.string().trim().max(160),
+  logoUrl: z.string().trim().url().or(z.literal("")),
+  primaryColor: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+  accentColor: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+  currency: z.enum(["NGN", "GHS", "ZAR", "KES", "USD"]),
+  supportEmail: z.string().trim().email().or(z.literal("")),
+  supportPhone: z.string().trim().max(30),
+});
+export type Brand = z.infer<typeof brandSchema>;
+export const DEFAULT_BRAND: Brand = {
+  companyName: "Binary Commerce",
+  tagline: "Genuine products, rewarded fairly.",
+  logoUrl: "",
+  primaryColor: "#0f5132",
+  accentColor: "#c9a227",
+  currency: "NGN",
+  supportEmail: "",
+  supportPhone: "",
+};
+
+export async function getBrand(tx: Tx = prisma): Promise<Brand> {
+  const row = await tx.setting.findUnique({ where: { key: "brand" } });
+  return brandSchema.parse({ ...DEFAULT_BRAND, ...((row?.value as object) ?? {}) });
+}
 
 export async function getCompPlan(tx: Tx = prisma): Promise<CompPlan> {
   const row = await tx.setting.findUnique({ where: { key: "compPlan" } });
@@ -69,6 +96,6 @@ export async function getShopSettings(tx: Tx = prisma): Promise<ShopSettings> {
   return shopSettingsSchema.parse({ ...DEFAULT_SHOP, ...((row?.value as object) ?? {}) });
 }
 
-export async function saveSetting(key: "compPlan" | "shop", value: CompPlan | ShopSettings, tx: Tx = prisma) {
+export async function saveSetting(key: "compPlan" | "shop" | "brand", value: CompPlan | ShopSettings | Brand, tx: Tx = prisma) {
   await tx.setting.upsert({ where: { key }, create: { key, value }, update: { value } });
 }

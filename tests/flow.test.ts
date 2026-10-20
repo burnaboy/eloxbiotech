@@ -13,7 +13,7 @@ async function buyAndPay(userId: string, productId: string, qty = 1) {
   const order = await createOrderFromCart(userId, address);
   await startPayment(order.id, userId);
   const pay = await prisma.payment.findFirstOrThrow({ where: { orderId: order.id } });
-  const { body, signature } = buildTestEvent({ type: "payment.succeeded", providerRef: pay.providerRef, amountMinor: order.totalMinor, currency: "USD" });
+  const { body, signature } = buildTestEvent({ type: "payment.succeeded", providerRef: pay.providerRef, amountMinor: order.totalMinor, currency: "NGN" });
   const event = await testProvider.parseWebhook(body, new Headers({ "x-test-signature": signature }));
   const res = await applyPaymentEvent("test", event!);
   expect(res.status).toBe("paid");
@@ -109,7 +109,7 @@ describe("checkout, stock and payments", () => {
     const order = await createOrderFromCart(u.id, address);
     await startPayment(order.id, u.id);
     const pay = await prisma.payment.findFirstOrThrow({ where: { orderId: order.id } });
-    const { body, signature } = buildTestEvent({ type: "payment.succeeded", providerRef: pay.providerRef, amountMinor: order.totalMinor, currency: "USD" });
+    const { body, signature } = buildTestEvent({ type: "payment.succeeded", providerRef: pay.providerRef, amountMinor: order.totalMinor, currency: "NGN" });
     await expect(testProvider.parseWebhook(body, new Headers({ "x-test-signature": "00".repeat(32) }))).rejects.toThrow();
     const e = (await testProvider.parseWebhook(body, new Headers({ "x-test-signature": signature })))!;
     expect((await applyPaymentEvent("test", e)).status).toBe("paid");
@@ -124,7 +124,7 @@ describe("checkout, stock and payments", () => {
     const order = await createOrderFromCart(u.id, address);
     await startPayment(order.id, u.id);
     const pay = await prisma.payment.findFirstOrThrow({ where: { orderId: order.id } });
-    const { body, signature } = buildTestEvent({ type: "payment.succeeded", providerRef: pay.providerRef, amountMinor: 1, currency: "USD" });
+    const { body, signature } = buildTestEvent({ type: "payment.succeeded", providerRef: pay.providerRef, amountMinor: 1, currency: "NGN" });
     const e = (await testProvider.parseWebhook(body, new Headers({ "x-test-signature": signature })))!;
     expect((await applyPaymentEvent("test", e)).status).toBe("amount_mismatch");
     expect((await prisma.order.findUniqueOrThrow({ where: { id: order.id } })).status).toBe("PENDING_PAYMENT");
@@ -235,17 +235,58 @@ describe("payouts", () => {
     const root = await makeRoot();
     const a = await affiliate(root.referralCode, "LEFT");
     const c = await customer(a.referralCode);
-    const p = await product({ priceMinor: 10000, stock: 10 });
-    await buyAndPay(c.id, p.id); // direct bonus 5000
+    const p = await product({ priceMinor: 2000000, stock: 10 });
+    await buyAndPay(c.id, p.id); // direct bonus 1,000,000 kobo
     await matureOrders(later(1));
     const results = await Promise.allSettled(
-      Array.from({ length: 4 }, () => requestPayout(a.id, { amountMinor: 3000, method: "BANK_TRANSFER", destination: "0123456789 Test Bank" })),
+      Array.from({ length: 4 }, () => requestPayout(a.id, { amountMinor: 600000, method: "BANK_TRANSFER", destination: "0123456789 Test Bank" })),
     );
     expect(results.filter((r) => r.status === "fulfilled").length).toBe(1);
     const payout = await prisma.payout.findFirstOrThrow({ where: { userId: a.id } });
     await expect(processPayout(payout.id, "PAY", root.id, "TX1")).rejects.toThrow();
     await processPayout(payout.id, "APPROVE", root.id);
     await processPayout(payout.id, "PAY", root.id, "TX1");
-    expect((await walletBalance(a.id)).availableMinor).toBe(2000);
+    expect((await walletBalance(a.id)).availableMinor).toBe(400000);
+  });
+});
+
+describe("refunds and chargebacks from the gateway", () => {
+  async function paidOrder(holdDays = 0) {
+    await setPlan({ holdDays });
+    const root = await makeRoot();
+    const a = await affiliate(root.referralCode, "LEFT");
+    const c = await customer(a.referralCode);
+    const p = await product();
+    const order = await buyAndPay(c.id, p.id);
+    const pay = await prisma.payment.findFirstOrThrow({ where: { orderId: order.id } });
+    return { root, a, order, ref: pay.providerRef };
+  }
+
+  it("an open dispute blocks commissions until it is won", async () => {
+    const { a, order, ref } = await paidOrder();
+    await applyPaymentEvent("test", { eventId: "d1", type: "dispute.opened", providerRef: ref });
+    expect(await matureOrders(later(1))).toBe(0);
+    expect((await applyPaymentEvent("test", { eventId: "d2", type: "dispute.resolved", providerRef: ref, merchantLost: false })).status).toBe("dispute_won");
+    expect(await matureOrders(later(1))).toBe(1);
+    expect((await walletBalance(a.id)).availableMinor).toBeGreaterThan(0);
+    void order;
+  });
+
+  it("a lost chargeback after commissions reverses them", async () => {
+    const { a, order, ref } = await paidOrder();
+    await matureOrders(later(1));
+    expect((await walletBalance(a.id)).availableMinor).toBe(500);
+    const r = await applyPaymentEvent("test", { eventId: "d3", type: "dispute.resolved", providerRef: ref, merchantLost: true });
+    expect(r.status).toBe("charged_back");
+    expect((await walletBalance(a.id)).availableMinor).toBe(0);
+    expect((await prisma.order.findUniqueOrThrow({ where: { id: order.id } })).status).toBe("REFUNDED");
+  });
+
+  it("a refund made in the gateway dashboard is recorded once", async () => {
+    const { order, ref } = await paidOrder(14);
+    const e = { eventId: "r1", type: "payment.refunded" as const, providerRef: ref, amountMinor: order.totalMinor };
+    expect((await applyPaymentEvent("test", e)).status).toBe("refunded");
+    expect((await applyPaymentEvent("test", { ...e, eventId: "r2" })).status).toBe("ignored");
+    expect(await matureOrders(later(30))).toBe(0);
   });
 });

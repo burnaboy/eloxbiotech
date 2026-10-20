@@ -1,6 +1,8 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { PaymentEvent, PaymentProvider } from "./types";
 
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
+
 /**
  * Built-in simulated gateway for development and automated tests. It never moves money.
  * Webhooks are HMAC-signed exactly like a real gateway, so the same verification path is exercised.
@@ -15,7 +17,7 @@ export function signTestPayload(body: string) {
   return createHmac("sha256", secret()).update(body).digest("hex");
 }
 
-export function buildTestEvent(e: Omit<PaymentEvent, "eventId">) {
+export function buildTestEvent(e: DistributiveOmit<PaymentEvent, "eventId">) {
   const body = JSON.stringify({ ...e, eventId: `evt_${randomBytes(8).toString("hex")}` });
   return { body, signature: signTestPayload(body) };
 }

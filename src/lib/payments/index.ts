@@ -1,7 +1,8 @@
 import type { PaymentProvider } from "./types";
 import { testProvider } from "./test-provider";
+import { paystackProvider } from "./paystack";
 
-const providers: Record<string, PaymentProvider> = { test: testProvider };
+const providers: Record<string, PaymentProvider> = { test: testProvider, paystack: paystackProvider };
 
 export function getProvider(name = process.env.PAYMENT_PROVIDER ?? "test"): PaymentProvider {
   if (name === "test" && process.env.NODE_ENV === "production" && process.env.ALLOW_TEST_PAYMENTS !== "true") {

@@ -5,7 +5,7 @@ const env = {
   DATABASE_URL: "postgresql://mlm:mlm@localhost:5432/mlm_test?schema=public",
   TEST_PAYMENT_SECRET: "test-secret",
   PAYMENT_PROVIDER: "test",
-  CURRENCY: "USD",
+  CURRENCY: "NGN",
 };
 
 export default defineConfig({

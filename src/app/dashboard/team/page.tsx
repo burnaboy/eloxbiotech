@@ -1,0 +1,42 @@
+import { requireAffiliate } from "@/lib/session";
+import { prisma } from "@/lib/db";
+import { formatDate } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
+import { Empty, TBody, THead, Table, Td, Th } from "@/components/ui/table";
+
+export const metadata = { title: "My referrals" };
+
+export default async function TeamPage() {
+  const user = await requireAffiliate();
+  const me = await prisma.affiliateNode.findUniqueOrThrow({ where: { userId: user.id } });
+  const [refs, children] = await Promise.all([
+    prisma.user.findMany({ where: { sponsorId: user.id }, include: { node: true }, orderBy: { createdAt: "desc" } }),
+    prisma.affiliateNode.findMany({ where: { parentId: me.id }, select: { id: true, position: true } }),
+  ]);
+  const childLeg = new Map(children.map((c) => [c.id, c.position]));
+  const sideOf = (ancestorIds: string[], id: string) => {
+    const path = [...ancestorIds, id];
+    return childLeg.get(path[path.indexOf(me.id) + 1]) ?? null;
+  };
+  return (
+    <>
+      <h1 className="text-2xl font-semibold tracking-tight">My referrals</h1>
+      <p className="text-sm text-muted-foreground">People who signed up with your link. Customers buy through you; affiliates are also placed in your tree.</p>
+      {refs.length === 0 ? <Empty>No referrals yet.</Empty> : (
+        <Table>
+          <THead><tr><Th>Name</Th><Th>Type</Th><Th>Side</Th><Th>Joined</Th></tr></THead>
+          <TBody>
+            {refs.map((r) => (
+              <tr key={r.id}>
+                <Td className="font-medium">{r.name}</Td>
+                <Td><Badge tone={r.role === "CUSTOMER" ? "neutral" : "primary"}>{r.role === "CUSTOMER" ? "customer" : "affiliate"}</Badge></Td>
+                <Td>{r.node ? (sideOf(r.node.ancestorIds, r.node.id)?.toLowerCase() ?? "—") : "—"}</Td>
+                <Td>{formatDate(r.createdAt)}</Td>
+              </tr>
+            ))}
+          </TBody>
+        </Table>
+      )}
+    </>
+  );
+}

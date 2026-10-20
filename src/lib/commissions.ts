@@ -14,7 +14,7 @@ export async function matureOrders(now = new Date()) {
   const plan = await getCompPlan();
   const cutoff = new Date(now.getTime() - plan.holdDays * 864e5);
   const due = await prisma.order.findMany({
-    where: { status: { in: ["PAID", "SHIPPED", "DELIVERED"] }, commissionedAt: null, paidAt: { lte: cutoff } },
+    where: { status: { in: ["PAID", "SHIPPED", "DELIVERED"] }, commissionedAt: null, disputedAt: null, paidAt: { lte: cutoff } },
     select: { id: true },
     orderBy: { paidAt: "asc" },
   });
@@ -22,7 +22,7 @@ export async function matureOrders(now = new Date()) {
   for (const { id } of due) {
     const done = await prisma.$transaction(async (tx) => {
       const claimed = await tx.order.updateMany({
-        where: { id, commissionedAt: null, status: { in: ["PAID", "SHIPPED", "DELIVERED"] } },
+        where: { id, commissionedAt: null, disputedAt: null, status: { in: ["PAID", "SHIPPED", "DELIVERED"] } },
         data: { commissionedAt: now },
       });
       if (claimed.count === 0) return false;

@@ -1,10 +1,9 @@
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
-import type { OrderStatus } from "@prisma/client";
+import type { OrderStatus, Prisma } from "@prisma/client";
 import { prisma, type Tx } from "./db";
 import { AppError } from "./errors";
-import { CURRENCY } from "./money";
-import { getShopSettings } from "./settings";
+import { getBrand, getShopSettings } from "./settings";
 import { getProvider } from "./payments";
 import type { PaymentEvent } from "./payments/types";
 import { audit } from "./audit";
@@ -74,6 +73,7 @@ function orderNumber() {
 export async function createOrderFromCart(userId: string, rawAddress: Address) {
   const address = addressSchema.parse(rawAddress);
   const shop = await getShopSettings();
+  const brand = await getBrand();
 
   const order = await prisma.$transaction(async (tx) => {
     const user = await tx.user.findUniqueOrThrow({ where: { id: userId }, include: { node: true, sponsor: { include: { node: true } } } });
@@ -96,7 +96,7 @@ export async function createOrderFromCart(userId: string, rawAddress: Address) {
       data: {
         number: orderNumber(),
         userId,
-        currency: CURRENCY,
+        currency: brand.currency,
         subtotalMinor,
         shippingMinor,
         totalMinor: subtotalMinor + shippingMinor,
@@ -152,7 +152,7 @@ export async function startPayment(orderId: string, userId: string) {
 
 /**
  * Applies a verified gateway event. Idempotent: replays of the same event id are ignored,
- * and the order only moves PENDING_PAYMENT -> PAID once.
+ * and each order transition only happens once.
  */
 export async function applyPaymentEvent(providerName: string, event: PaymentEvent) {
   return prisma.$transaction(async (tx) => {
@@ -163,31 +163,78 @@ export async function applyPaymentEvent(providerName: string, event: PaymentEven
     }
     const payment = await tx.payment.findUnique({ where: { providerRef: event.providerRef }, include: { order: true } });
     if (!payment || payment.provider !== providerName) return { status: "unknown_payment" as const };
+    const order = payment.order;
+    const raw = { ...event } as Prisma.InputJsonObject;
 
-    if (event.type === "payment.failed") {
-      await tx.payment.update({ where: { id: payment.id }, data: { status: "FAILED", raw: event as object } });
-      return { status: "failed" as const };
+    switch (event.type) {
+      case "payment.failed": {
+        if (payment.status === "PENDING") await tx.payment.update({ where: { id: payment.id }, data: { status: "FAILED", raw } });
+        return { status: "failed" as const };
+      }
+      case "payment.succeeded": {
+        if (event.amountMinor !== order.totalMinor || event.currency !== order.currency) {
+          await tx.payment.update({ where: { id: payment.id }, data: { status: "FAILED", raw } });
+          await audit("payment.amountMismatch", "Order", order.id, null, { event: raw }, tx);
+          return { status: "amount_mismatch" as const };
+        }
+        await tx.payment.update({ where: { id: payment.id }, data: { status: "SUCCEEDED", raw } });
+        const moved = await tx.order.updateMany({
+          where: { id: order.id, status: "PENDING_PAYMENT" },
+          data: { status: "PAID", paidAt: new Date() },
+        });
+        if (moved.count === 0) {
+          // Paid after the order expired or was cancelled, or a second payment on one order: refund manually.
+          await audit("payment.needsReview", "Order", order.id, null, { providerRef: event.providerRef, orderStatus: order.status }, tx);
+          return { status: "needs_review" as const };
+        }
+        await audit("order.paid", "Order", order.id, null, { providerRef: event.providerRef }, tx);
+        return { status: "paid" as const, orderId: order.id };
+      }
+      case "payment.refunded": {
+        // Refund done in the gateway dashboard. If we started it ourselves the order is already REFUNDED.
+        if (!PAID_STATES.includes(order.status)) return { status: "ignored" as const };
+        await applyRefund(tx, order.id, null, { restock: false, reason: "Refunded in payment gateway" });
+        return { status: "refunded" as const };
+      }
+      case "dispute.opened": {
+        await tx.order.update({ where: { id: order.id }, data: { disputedAt: order.disputedAt ?? new Date() } });
+        await audit("order.disputeOpened", "Order", order.id, null, { providerRef: event.providerRef }, tx);
+        return { status: "disputed" as const };
+      }
+      case "dispute.resolved": {
+        if (event.merchantLost && PAID_STATES.includes(order.status)) {
+          await applyRefund(tx, order.id, null, { restock: false, reason: "Chargeback" });
+          return { status: "charged_back" as const };
+        }
+        await tx.order.update({ where: { id: order.id }, data: { disputedAt: null } });
+        await audit("order.disputeWon", "Order", order.id, null, undefined, tx);
+        return { status: "dispute_won" as const };
+      }
     }
-
-    if (event.amountMinor !== payment.order.totalMinor || event.currency !== payment.order.currency) {
-      await tx.payment.update({ where: { id: payment.id }, data: { status: "FAILED", raw: event as object } });
-      await audit("payment.amountMismatch", "Order", payment.orderId, null, { event: event as object }, tx);
-      return { status: "amount_mismatch" as const };
-    }
-
-    await tx.payment.update({ where: { id: payment.id }, data: { status: "SUCCEEDED", raw: event as object } });
-    const moved = await tx.order.updateMany({
-      where: { id: payment.orderId, status: "PENDING_PAYMENT" },
-      data: { status: "PAID", paidAt: new Date() },
-    });
-    if (moved.count === 0) {
-      // Paid after the order expired or was cancelled: flag for a manual refund.
-      await audit("payment.lateOrDuplicate", "Order", payment.orderId, null, { providerRef: event.providerRef, status: payment.order.status }, tx);
-      return { status: "needs_review" as const };
-    }
-    await audit("order.paid", "Order", payment.orderId, null, { providerRef: event.providerRef }, tx);
-    return { status: "paid" as const, orderId: payment.orderId };
   });
+}
+
+/** Re-checks unpaid orders with the gateway, in case a webhook was missed. Run on a schedule. */
+export async function reconcilePendingPayments(olderThanMinutes = 5) {
+  const cutoff = new Date(Date.now() - olderThanMinutes * 60e3);
+  const pending = await prisma.payment.findMany({
+    where: { status: "PENDING", createdAt: { lt: cutoff }, order: { status: { in: ["PENDING_PAYMENT", "CANCELLED"] } } },
+    take: 200,
+  });
+  const results: Record<string, number> = {};
+  for (const p of pending) {
+    const provider = getProvider(p.provider);
+    if (!provider.verify) continue;
+    try {
+      const e = await provider.verify(p.providerRef);
+      if (!e) continue;
+      const r = await applyPaymentEvent(provider.name, e);
+      results[r.status] = (results[r.status] ?? 0) + 1;
+    } catch {
+      results.error = (results.error ?? 0) + 1;
+    }
+  }
+  return results;
 }
 
 // ---------- Cancellation, expiry, fulfilment, refunds ----------
@@ -240,22 +287,24 @@ export async function updateFulfilment(orderId: string, to: "SHIPPED" | "DELIVER
   });
 }
 
-/** Full refund. Restocks if asked, and reverses any commissions and volume already credited. */
+const PAID_STATES: OrderStatus[] = ["PAID", "SHIPPED", "DELIVERED"];
+
+/** Full refund started by an admin: refunds through the gateway, then updates our records. */
 export async function refundOrder(orderId: string, actorId: string, opts: { restock: boolean; reason?: string }) {
   const order = await prisma.order.findUniqueOrThrow({ where: { id: orderId }, include: { payments: true } });
-  if (!["PAID", "SHIPPED", "DELIVERED"].includes(order.status)) throw new AppError("Only paid orders can be refunded.");
+  if (!PAID_STATES.includes(order.status)) throw new AppError("Only paid orders can be refunded.");
   const paid = order.payments.find((p) => p.status === "SUCCEEDED");
   if (paid) await getProvider(paid.provider).refund(paid.providerRef, paid.amountMinor);
+  await prisma.$transaction((tx) => applyRefund(tx, orderId, actorId, opts));
+}
 
-  await prisma.$transaction(async (tx) => {
-    const moved = await tx.order.updateMany({
-      where: { id: orderId, status: { in: ["PAID", "SHIPPED", "DELIVERED"] } },
-      data: { status: "REFUNDED" },
-    });
-    if (moved.count === 0) throw new AppError("Order was already refunded.");
-    if (paid) await tx.payment.update({ where: { id: paid.id }, data: { status: "REFUNDED" } });
-    if (opts.restock) await releaseStock(tx, orderId, "REFUND", actorId);
-    if (order.commissionedAt) await reverseOrderCommissions(tx, order.id, actorId);
-    await audit("order.refund", "Order", orderId, actorId, { restock: opts.restock, reason: opts.reason ?? null }, tx);
-  });
+/** Marks an order refunded, optionally restocks, and reverses commissions/volume if already credited. */
+async function applyRefund(tx: Tx, orderId: string, actorId: string | null, opts: { restock: boolean; reason?: string }) {
+  const moved = await tx.order.updateMany({ where: { id: orderId, status: { in: PAID_STATES } }, data: { status: "REFUNDED" } });
+  if (moved.count === 0) throw new AppError("Order was already refunded.");
+  await tx.payment.updateMany({ where: { orderId, status: "SUCCEEDED" }, data: { status: "REFUNDED" } });
+  if (opts.restock) await releaseStock(tx, orderId, "REFUND", actorId);
+  const order = await tx.order.findUniqueOrThrow({ where: { id: orderId } });
+  if (order.commissionedAt) await reverseOrderCommissions(tx, order.id, actorId);
+  await audit("order.refund", "Order", orderId, actorId, { restock: opts.restock, reason: opts.reason ?? null }, tx);
 }

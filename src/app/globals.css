@@ -1,0 +1,35 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 250 250 247;
+    --foreground: 23 28 26;
+    --card: 255 255 255;
+    --muted: 241 242 238;
+    --muted-foreground: 98 108 102;
+    --border: 225 228 222;
+    --primary: 15 81 50; /* overridden from brand settings */
+    --primary-foreground: 255 255 255;
+    --accent: 201 162 39; /* overridden from brand settings */
+    --accent-foreground: 23 28 26;
+    --destructive: 190 38 38;
+    --success: 22 128 61;
+    --warning: 180 120 0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --background: 14 17 16;
+      --foreground: 236 238 234;
+      --card: 22 26 24;
+      --muted: 32 37 35;
+      --muted-foreground: 156 165 159;
+      --border: 46 52 49;
+      --accent-foreground: 14 17 16;
+    }
+  }
+  * { @apply border-border; }
+  body { @apply bg-background text-foreground antialiased; }
+  :focus-visible { @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background; }
+}
