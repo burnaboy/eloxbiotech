@@ -1,0 +1,13 @@
+import type { PaymentProvider } from "./types";
+import { testProvider } from "./test-provider";
+
+const providers: Record<string, PaymentProvider> = { test: testProvider };
+
+export function getProvider(name = process.env.PAYMENT_PROVIDER ?? "test"): PaymentProvider {
+  if (name === "test" && process.env.NODE_ENV === "production" && process.env.ALLOW_TEST_PAYMENTS !== "true") {
+    throw new Error("The simulated payment provider is disabled in production.");
+  }
+  const p = providers[name];
+  if (!p) throw new Error(`Unknown payment provider: ${name}`);
+  return p;
+}

@@ -1,0 +1,358 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  CUSTOMER
+  AFFILIATE
+  ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum Leg {
+  LEFT
+  RIGHT
+}
+
+enum OrderStatus {
+  PENDING_PAYMENT
+  PAID
+  SHIPPED
+  DELIVERED
+  CANCELLED
+  REFUNDED
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  REFUNDED
+}
+
+enum InventoryReason {
+  RESTOCK
+  SALE
+  RELEASE
+  REFUND
+  ADJUSTMENT
+}
+
+enum CommissionType {
+  DIRECT
+  BINARY
+  ADJUSTMENT
+}
+
+enum CommissionStatus {
+  AVAILABLE
+  REVERSED
+}
+
+enum PayoutStatus {
+  REQUESTED
+  APPROVED
+  PAID
+  REJECTED
+}
+
+model User {
+  id            String     @id @default(cuid())
+  email         String     @unique
+  passwordHash  String
+  name          String
+  phone         String?
+  role          Role       @default(CUSTOMER)
+  status        UserStatus @default(ACTIVE)
+  referralCode  String     @unique
+  sponsorId     String?
+  sponsor       User?      @relation("Sponsorship", fields: [sponsorId], references: [id])
+  referrals     User[]     @relation("Sponsorship")
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  sessions    Session[]
+  node        AffiliateNode?
+  cartItems   CartItem[]
+  orders      Order[]
+  commissions Commission[]
+  payouts     Payout[]
+
+  @@index([sponsorId])
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  ip        String?
+  userAgent String?
+
+  @@index([userId])
+}
+
+model LoginAttempt {
+  id        String   @id @default(cuid())
+  key       String
+  success   Boolean
+  createdAt DateTime @default(now())
+
+  @@index([key, createdAt])
+}
+
+/// A position in the binary tree. One per affiliate.
+model AffiliateNode {
+  id          String          @id @default(cuid())
+  userId      String          @unique
+  user        User            @relation(fields: [userId], references: [id])
+  parentId    String?
+  parent      AffiliateNode?  @relation("Tree", fields: [parentId], references: [id])
+  children    AffiliateNode[] @relation("Tree")
+  position    Leg?
+  depth       Int             @default(0)
+  /// Ancestor node ids, root first. Used to credit volume up the tree in one query.
+  ancestorIds String[]
+  /// Preferred leg for new referrals when the link doesn't specify one. Null = weaker leg.
+  defaultLeg  Leg?
+
+  personalPv  Int @default(0)
+  leftCarryPv Int @default(0)
+  rightCarryPv Int @default(0)
+  leftTotalPv Int @default(0)
+  rightTotalPv Int @default(0)
+  leftCount   Int @default(0)
+  rightCount  Int @default(0)
+
+  createdAt DateTime @default(now())
+
+  volumes VolumeEntry[]
+
+  @@unique([parentId, position])
+  @@index([parentId])
+}
+
+/// Every PV credit to a node's leg, so volume can be audited and reversed.
+model VolumeEntry {
+  id        String        @id @default(cuid())
+  nodeId    String
+  node      AffiliateNode @relation(fields: [nodeId], references: [id])
+  orderId   String
+  order     Order         @relation(fields: [orderId], references: [id])
+  leg       Leg?
+  /// Positive on credit, negative on reversal. Null leg = personal volume.
+  pv        Int
+  createdAt DateTime      @default(now())
+
+  @@index([nodeId])
+  @@index([orderId])
+}
+
+model Product {
+  id                String   @id @default(cuid())
+  sku               String   @unique
+  slug              String   @unique
+  name              String
+  description       String
+  priceMinor        Int
+  pv                Int      @default(0)
+  stock             Int      @default(0)
+  lowStockThreshold Int      @default(5)
+  weightGrams       Int      @default(0)
+  imageUrl          String?
+  active            Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  cartItems  CartItem[]
+  orderItems OrderItem[]
+  movements  InventoryMovement[]
+}
+
+model InventoryMovement {
+  id        String          @id @default(cuid())
+  productId String
+  product   Product         @relation(fields: [productId], references: [id])
+  delta     Int
+  reason    InventoryReason
+  orderId   String?
+  actorId   String?
+  note      String?
+  createdAt DateTime        @default(now())
+
+  @@index([productId, createdAt])
+}
+
+model CartItem {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product  @relation(fields: [productId], references: [id])
+  quantity  Int
+  createdAt DateTime @default(now())
+
+  @@unique([userId, productId])
+}
+
+model Order {
+  id            String      @id @default(cuid())
+  number        String      @unique
+  userId        String
+  user          User        @relation(fields: [userId], references: [id])
+  status        OrderStatus @default(PENDING_PAYMENT)
+  currency      String
+  subtotalMinor Int
+  shippingMinor Int
+  totalMinor    Int
+  totalPv       Int
+  /// Node that receives this order's volume (buyer's node, or their sponsor's node for customers).
+  volumeNodeId  String?
+  /// Sponsor credited with the direct bonus, snapshotted at checkout.
+  referrerId    String?
+
+  shipName    String
+  shipPhone   String
+  shipLine1   String
+  shipLine2   String?
+  shipCity    String
+  shipState   String
+  shipCountry String
+  shipPostal  String?
+  trackingRef String?
+
+  paidAt          DateTime?
+  /// Set when the refund-hold window passes and commissions + volume are credited.
+  commissionedAt  DateTime?
+  expiresAt       DateTime
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  items       OrderItem[]
+  payments    Payment[]
+  volumes     VolumeEntry[]
+  commissions Commission[]
+
+  @@index([userId])
+  @@index([status, paidAt])
+}
+
+model OrderItem {
+  id             String  @id @default(cuid())
+  orderId        String
+  order          Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId      String
+  product        Product @relation(fields: [productId], references: [id])
+  name           String
+  sku            String
+  unitPriceMinor Int
+  pv             Int
+  quantity       Int
+}
+
+model Payment {
+  id          String        @id @default(cuid())
+  orderId     String
+  order       Order         @relation(fields: [orderId], references: [id])
+  provider    String
+  providerRef String        @unique
+  status      PaymentStatus @default(PENDING)
+  amountMinor Int
+  currency    String
+  raw         Json?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@index([orderId])
+}
+
+/// Idempotency for payment webhooks.
+model WebhookEvent {
+  id         String   @id @default(cuid())
+  provider   String
+  eventId    String
+  type       String
+  receivedAt DateTime @default(now())
+
+  @@unique([provider, eventId])
+}
+
+model Commission {
+  id          String           @id @default(cuid())
+  userId      String
+  user        User             @relation(fields: [userId], references: [id])
+  type        CommissionType
+  status      CommissionStatus @default(AVAILABLE)
+  amountMinor Int
+  orderId     String?
+  order       Order?           @relation(fields: [orderId], references: [id])
+  runId       String?
+  run         BinaryRun?       @relation(fields: [runId], references: [id])
+  /// Pairs paid, PV consumed, cap applied etc.
+  details     Json?
+  note        String?
+  createdAt   DateTime         @default(now())
+
+  @@unique([userId, type, orderId])
+  @@index([userId, createdAt])
+}
+
+/// One binary pairing run per period (e.g. per day). periodKey is unique so a run can never pay twice.
+model BinaryRun {
+  id          String   @id @default(cuid())
+  periodKey   String   @unique
+  pairsPaid   Int      @default(0)
+  amountMinor Int      @default(0)
+  flushedMinor Int     @default(0)
+  createdAt   DateTime @default(now())
+  actorId     String?
+
+  commissions Commission[]
+}
+
+model Payout {
+  id           String       @id @default(cuid())
+  userId       String
+  user         User         @relation(fields: [userId], references: [id])
+  amountMinor  Int
+  status       PayoutStatus @default(REQUESTED)
+  method       String
+  destination  String
+  reference    String?
+  processedById String?
+  processedAt  DateTime?
+  note         String?
+  createdAt    DateTime     @default(now())
+
+  @@index([userId, status])
+}
+
+model Setting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  actorId   String?
+  action    String
+  entity    String
+  entityId  String?
+  data      Json?
+  createdAt DateTime @default(now())
+
+  @@index([entity, entityId])
+  @@index([createdAt])
+}
