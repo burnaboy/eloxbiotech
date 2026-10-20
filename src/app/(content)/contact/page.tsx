@@ -4,7 +4,7 @@ import { Mail, MapPin, Phone } from "lucide-react";
 import { getBrand } from "@/lib/settings";
 import { prisma } from "@/lib/db";
 import { clientIp } from "@/lib/session";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input, Textarea } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -31,7 +31,7 @@ export default async function Contact({ searchParams }: { searchParams: Promise<
   return (
     <div className="grid max-w-5xl gap-8 md:grid-cols-[1fr_300px]">
       <Card>
-        <CardHeader><CardTitle>Contact us</CardTitle></CardHeader>
+        <CardHeader><h1 className="text-2xl font-semibold tracking-tight">Contact us</h1></CardHeader>
         <CardContent className="space-y-4">
           <Flash sp={await searchParams} />
           <form action={send} className="space-y-4">

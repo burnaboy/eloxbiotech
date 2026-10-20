@@ -46,7 +46,7 @@ const num = (fd: FormData, k: string) => Number(str(fd, k));
 
 // ---------- Products, categories, testimonials ----------
 
-export const productInput = z.object({
+const productInput = z.object({
   name: z.string().trim().min(2).max(120),
   slug: z.string().trim().toLowerCase().regex(/^[a-z0-9-]+$/, "Use lowercase letters, numbers and dashes").max(120),
   sku: z.string().trim().toUpperCase().min(2).max(40),

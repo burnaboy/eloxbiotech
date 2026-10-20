@@ -12,7 +12,9 @@
     "db:migrate": "prisma migrate dev",
     "db:shadow-diff": "prisma migrate diff --from-migrations prisma/migrations --to-schema-datamodel prisma/schema.prisma --shadow-database-url $SHADOW_DATABASE_URL --script",
     "db:deploy": "prisma migrate deploy",
-    "db:seed": "tsx prisma/seed.ts"
+    "db:seed": "tsx prisma/seed.ts",
+    "test:e2e": "playwright test",
+    "seed": "tsx prisma/seed.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
@@ -37,6 +39,7 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@playwright/test": "^1.56.1",
     "@types/bcryptjs": "^2.4.6",
     "@types/node": "^22.20.5",
     "@types/qrcode": "^1.5.6",
