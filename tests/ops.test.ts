@@ -57,3 +57,23 @@ describe("scheduler", () => {
     expect(at.binary).toBe("2026-10-20T23:15:20.000Z"); // 00:15 in Lagos
   });
 });
+
+describe("colour modes", () => {
+  it("lightens any brand colour until it reads on the dark background", async () => {
+    const { contrastRatio, darkModeVariant } = await import("@/lib/utils");
+    const bg = [14, 17, 16];
+    for (const hex of ["#0f5132", "#c9a227", "#000000", "#1d4ed8", "#7f1d1d", "#ffffff"]) {
+      const rgb = darkModeVariant(hex).split(" ").map(Number);
+      expect(contrastRatio(rgb, bg), hex).toBeGreaterThanOrEqual(4.5);
+    }
+    expect(darkModeVariant("#ffffff")).toBe("255 255 255"); // already readable: unchanged
+  });
+
+  it("falls back to following the device for anything but light or dark", async () => {
+    const { parseTheme } = await import("@/lib/theme");
+    expect(parseTheme("dark")).toBe("dark");
+    expect(parseTheme("light")).toBe("light");
+    expect(parseTheme(undefined)).toBe("system");
+    expect(parseTheme("<script>")).toBe("system");
+  });
+});

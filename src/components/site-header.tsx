@@ -7,12 +7,16 @@ import { prisma } from "@/lib/db";
 import { Button } from "@/components/ui/button";
 import { logoutAction } from "@/app/(auth)/actions";
 import { MobileMenu } from "@/components/mobile-menu";
+import { ThemeToggle } from "@/components/theme-toggle";
+import { cookies } from "next/headers";
+import { THEME_COOKIE, parseTheme } from "@/lib/theme";
 
 export async function SiteHeader() {
   const [brand, user] = await Promise.all([getBrand(), getCurrentUser()]);
   const cartCount = user ? (await prisma.cartItem.aggregate({ where: { userId: user.id }, _sum: { quantity: true } }))._sum.quantity ?? 0 : 0;
   const unread = user ? await prisma.notification.count({ where: { userId: user.id, readAt: null } }) : 0;
   const ops = await getOps();
+  const theme = parseTheme((await cookies()).get(THEME_COOKIE)?.value);
   return (
     <>
     {ops.notice && <div role="status" className="bg-accent px-4 py-2 text-center text-sm text-accent-foreground">{ops.notice}</div>}
@@ -30,6 +34,7 @@ export async function SiteHeader() {
           <span>{brand.companyName}</span>
         </Link>
         <nav className="ml-auto flex items-center gap-1" aria-label="Main">
+          <ThemeToggle initial={theme} />
           <Button asChild variant="ghost" size="sm" className="hidden md:inline-flex">
             <Link href="/products">Shop</Link>
           </Button>

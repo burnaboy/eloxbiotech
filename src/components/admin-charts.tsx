@@ -14,7 +14,7 @@ export function RevenueChart({ data, currency }: { data: { day: string; revenue:
           <CartesianGrid stroke={grid} vertical={false} />
           <XAxis dataKey="day" tick={axis} tickLine={false} axisLine={false} minTickGap={24} />
           <YAxis tick={axis} tickLine={false} axisLine={false} tickFormatter={fmt} width={64} />
-          <Tooltip formatter={(v: number) => fmt(v)} contentStyle={{ background: "rgb(var(--card))", border: `1px solid ${grid}`, borderRadius: 8, fontSize: 12 }} />
+          <Tooltip formatter={(v: number) => fmt(v)} contentStyle={{ background: "rgb(var(--card))", border: `1px solid ${grid}`, borderRadius: 8, fontSize: 12, color: "rgb(var(--foreground))" }} labelStyle={{ color: "rgb(var(--foreground))" }} />
           <Line type="monotone" dataKey="revenue" name="Paid revenue" stroke="rgb(var(--primary))" strokeWidth={2} dot={false} />
           <Line type="monotone" dataKey="commissions" name="Commissions earned" stroke="rgb(var(--accent))" strokeWidth={2} dot={false} />
         </LineChart>
@@ -31,7 +31,7 @@ export function StatusChart({ data }: { data: { status: string; count: number }[
           <CartesianGrid stroke={grid} vertical={false} />
           <XAxis dataKey="status" tick={axis} tickLine={false} axisLine={false} />
           <YAxis tick={axis} tickLine={false} axisLine={false} allowDecimals={false} width={32} />
-          <Tooltip contentStyle={{ background: "rgb(var(--card))", border: `1px solid ${grid}`, borderRadius: 8, fontSize: 12 }} />
+          <Tooltip contentStyle={{ background: "rgb(var(--card))", border: `1px solid ${grid}`, borderRadius: 8, fontSize: 12, color: "rgb(var(--foreground))" }} labelStyle={{ color: "rgb(var(--foreground))" }} />
           <Bar dataKey="count" name="Orders" fill="rgb(var(--primary))" radius={[4, 4, 0, 0]} />
         </BarChart>
       </ResponsiveContainer>

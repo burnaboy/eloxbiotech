@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { signIn } from "./helpers";
 
 test("guest can browse the shop and read the policies", async ({ page }) => {
   await page.goto("/");
@@ -51,7 +52,33 @@ test("pages fit the screen without sideways scrolling, for guests and signed-in 
     expect(scroll, `${path} is ${scroll}px wide on a ${width}px screen`).toBeLessThanOrEqual(width);
   };
   for (const path of ["/", "/products", "/products/sample-product-with-sizes", "/compensation", "/login", "/register"]) await fits(path);
-  const { signIn } = await import("./helpers");
   await signIn(page, "ada@demo.local", "Password123");
   for (const path of ["/dashboard", "/dashboard/tree", "/dashboard/commissions", "/dashboard/payouts", "/account", "/cart", "/orders"]) await fits(path);
+});
+
+test("the colour mode switch steps through system, light and dark, and is remembered", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "dark" });
+  await page.goto("/");
+  const html = page.locator("html");
+  const bg = () => page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+  // System (default) follows the device, which is dark here.
+  await expect(html).not.toHaveAttribute("data-theme");
+  expect(await bg()).toBe("rgb(14, 17, 16)");
+
+  await page.getByRole("button", { name: /Colour mode: System/ }).click();
+  await expect(html).toHaveAttribute("data-theme", "light");
+  expect(await bg()).toBe("rgb(250, 250, 247)");
+
+  await page.getByRole("button", { name: /Colour mode: Light/ }).click();
+  await expect(html).toHaveAttribute("data-theme", "dark");
+  // The server renders the saved choice on the next page, so there is no flash of the wrong colours.
+  expect(await (await page.request.get("/products")).text()).toContain('data-theme="dark"');
+  await page.emulateMedia({ colorScheme: "light" });
+  await page.goto("/products");
+  await expect(html).toHaveAttribute("data-theme", "dark");
+  expect(await bg()).toBe("rgb(14, 17, 16)");
+
+  await page.getByRole("button", { name: /Colour mode: Dark/ }).click();
+  await expect(html).not.toHaveAttribute("data-theme");
+  expect(await bg()).toBe("rgb(250, 250, 247)");
 });

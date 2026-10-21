@@ -14,10 +14,10 @@ Results of the full release check (`scripts/release-check.sh`), run on 21 Octobe
 
 | Step | What | Result |
 | --- | --- | --- |
-| 1 | Type check, then unit and integration tests (Vitest, real PostgreSQL `mlm_test`) | 108 of 108 passed, 10 files, 33.4 s |
+| 1 | Type check, then unit and integration tests (Vitest, real PostgreSQL `mlm_test`) | 110 of 110 passed, 10 files, 33.1 s |
 | 2 | Migration guard; all 16 migrations applied to two empty databases and compared; drift against `schema.prisma` | 0 blocked; 40 tables, 7 triggers, 23 checks, identical both times; no drift |
 | 3 | Production build with throwaway secret values, then every browser file searched for them | Build succeeded; 104 files scanned, no secrets or server-only fields |
-| 4 | Browser tests (Playwright) against the production build, desktop and mobile | 12 of 12 passed, 1.1 min |
+| 4 | Browser tests (Playwright) against the production build, desktop and mobile | 14 of 14 passed, 49.4 s |
 | 5 | Server log from step 4 searched for passwords, secrets, keys, database credentials and session tokens | 7 lines, none found |
 | 6 | Backup with `pg_dump`, restored to a new database, verified | 117 rows in 39 tables match; audit chain, wallet ledger and network volume checks pass |
 
@@ -33,9 +33,9 @@ Results of the full release check (`scripts/release-check.sh`), run on 21 Octobe
 | `network.test.ts` | 8 | 8 | Sponsorship, permanent placement, no pay for recruiting, volume |
 | `binary.test.ts` | 6 | 6 | Pairing, caps, carry; 2:1 checked against brute force |
 | `paystack.test.ts` | 5 | 5 | Signatures, re-verification, event mapping |
-| `ops.test.ts` | 4 | 4 | Live-key rule, simulated gateway never in production, migration guard, scheduler |
+| `ops.test.ts` | 6 | 6 | Live-key rule, simulated gateway never in production, migration guard, scheduler, dark-mode colour contrast, colour mode setting |
 | `totp.test.ts` | 2 | 2 | RFC 6238 test vector, secret format |
-| **Total** | **108** | **108** | |
+| **Total** | **110** | **110** | |
 
 ## Browser tests
 
@@ -50,6 +50,7 @@ Results of the full release check (`scripts/release-check.sh`), run on 21 Octobe
 | Guests and members can't use admin pages, exports or any admin action (database unchanged) | Passed | Not run |
 | Members can't see others' orders; jobs, health status and webhooks need their secrets | Passed | Not run |
 | Pages fit the screen without sideways scrolling, signed out and signed in | Passed | Passed |
+| Colour mode switch steps through System, Light and Dark, and the server renders the saved choice | Passed | Passed |
 
 Only the storefront tests run at mobile size by design; the rest are desktop only.
 

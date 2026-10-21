@@ -10,24 +10,49 @@
     --muted: 241 242 238;
     --muted-foreground: 98 108 102;
     --border: 225 228 222;
-    --primary: 15 81 50; /* overridden from brand settings */
+    --primary: var(--brand-primary, 15 81 50); /* brand colours come from Admin → Settings */
     --primary-foreground: 255 255 255;
-    --accent: 201 162 39; /* overridden from brand settings */
+    --accent: var(--brand-accent, 201 162 39);
     --accent-foreground: 23 28 26;
     --destructive: 190 38 38;
     --success: 22 128 61;
     --warning: 180 120 0;
+    color-scheme: light;
   }
+  /* Dark colours: used when the member picks Dark, or picks System (the default) on a device set to dark. */
   @media (prefers-color-scheme: dark) {
-    :root {
+    :root:not([data-theme="light"]) {
       --background: 14 17 16;
       --foreground: 236 238 234;
       --card: 22 26 24;
       --muted: 32 37 35;
       --muted-foreground: 156 165 159;
       --border: 46 52 49;
+      --primary: var(--brand-primary-dark, 111 192 148);
+      --primary-foreground: 14 17 16;
+      --accent: var(--brand-accent-dark, 216 182 74);
       --accent-foreground: 14 17 16;
+      --destructive: 239 98 98;
+      --success: 74 196 120;
+      --warning: 230 170 50;
+      color-scheme: dark;
     }
+  }
+  :root[data-theme="dark"] {
+      --background: 14 17 16;
+      --foreground: 236 238 234;
+      --card: 22 26 24;
+      --muted: 32 37 35;
+      --muted-foreground: 156 165 159;
+      --border: 46 52 49;
+      --primary: var(--brand-primary-dark, 111 192 148);
+      --primary-foreground: 14 17 16;
+      --accent: var(--brand-accent-dark, 216 182 74);
+      --accent-foreground: 14 17 16;
+      --destructive: 239 98 98;
+      --success: 74 196 120;
+      --warning: 230 170 50;
+      color-scheme: dark;
   }
   * { @apply border-border; }
   body { @apply bg-background text-foreground antialiased; }

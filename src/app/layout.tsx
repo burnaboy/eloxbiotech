@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { getBrand } from "@/lib/settings";
-import { hexToRgbTriplet } from "@/lib/utils";
+import { darkModeVariant, hexToRgbTriplet } from "@/lib/utils";
+import { cookies } from "next/headers";
+import { THEME_COOKIE, parseTheme } from "@/lib/theme";
 import { Suspense } from "react";
 import { SiteHeader } from "@/components/site-header";
 import { Toaster } from "@/components/toast";
@@ -19,9 +21,15 @@ export async function generateMetadata(): Promise<Metadata> {
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const brand = await getBrand();
-  const style = { "--primary": hexToRgbTriplet(brand.primaryColor), "--accent": hexToRgbTriplet(brand.accentColor) } as React.CSSProperties;
+  const theme = parseTheme((await cookies()).get(THEME_COOKIE)?.value);
+  const style = {
+    "--brand-primary": hexToRgbTriplet(brand.primaryColor),
+    "--brand-accent": hexToRgbTriplet(brand.accentColor),
+    "--brand-primary-dark": darkModeVariant(brand.primaryColor),
+    "--brand-accent-dark": darkModeVariant(brand.accentColor),
+  } as React.CSSProperties;
   return (
-    <html lang="en" style={style}>
+    <html lang="en" style={style} data-theme={theme === "system" ? undefined : theme}>
       <body className="min-h-screen font-sans">
         <a href="#main" className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-card focus:px-4 focus:py-2">
           Skip to content

@@ -9,6 +9,7 @@ An online shop for Nigeria (prices in naira, payments through Paystack) with an 
 - **Shop:** catalogue with options, sale prices and stock; cart; checkout with delivery and VAT; Paystack payments verified on the server; receipts, returns and refunds.
 - **Affiliates:** referral links, binary tree placement (automatic or admin-approved), direct commission on customer sales after a return window, optional team (binary) pay, wallet, withdrawals to a verified Nigerian bank account.
 - **Admin:** orders, stock, members, network, commissions, withdrawals in batches with bank evidence, reports and CSV exports, risk and reconciliation checks, system health, audit log, emergency pause switches. Permissions per admin; two-step sign-in required.
+- **Light and dark mode:** a switch in the header (System, Light, Dark), remembered on each device; brand colours are lightened automatically so they stay readable in dark mode.
 - **Safeguards:** money in whole kobo; a permanent wallet ledger; a tamper-evident audit log; plan versions that never change after use; database rules that stop overselling, double payment, double commission, moving members in the tree, and editing financial history.
 
 ## Run it locally
