@@ -9,6 +9,7 @@ const env = {
   ALLOW_TEST_PAYMENTS: "true",
   TEST_PAYMENT_SECRET: "e2e-secret",
   CRON_SECRET: "e2e-cron",
+  MONITOR_TOKEN: "e2e-monitor",
   STORAGE_DRIVER: "local",
   ALLOW_LOCAL_STORAGE: "true",
   UPLOAD_DIR: ".data/e2e-uploads",

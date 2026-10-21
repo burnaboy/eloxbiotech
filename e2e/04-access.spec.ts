@@ -111,6 +111,15 @@ test("members can't see other people's orders, and scheduled jobs and webhooks n
   const wrong = await request.post("/api/cron/mature-orders", { headers: { Authorization: "Bearer wrong" }, failOnStatusCode: false });
   expect(wrong.status()).toBe(401);
 
+  // Detailed health for the external monitor needs its own token and reveals no secrets.
+  expect((await request.get("/api/health/status", { failOnStatusCode: false })).status()).toBe(401);
+  expect((await request.get("/api/health/status", { headers: { Authorization: "Bearer e2e-cron" }, failOnStatusCode: false })).status()).toBe(401);
+  const health = await request.get("/api/health/status", { headers: { Authorization: "Bearer e2e-monitor" }, failOnStatusCode: false });
+  expect([200, 503]).toContain(health.status());
+  const healthText = await health.text();
+  expect(JSON.parse(healthText).checks.length).toBeGreaterThan(5);
+  for (const secret of ["e2e-cron", "e2e-secret", "e2e-monitor", process.env.APP_ENCRYPTION_KEY!, "mlm:mlm"]) expect(healthText).not.toContain(secret);
+
   const forged = await request.post("/api/webhooks/test", {
     data: JSON.stringify({ eventId: "evt_forged", type: "payment.succeeded", providerRef: "x", amountMinor: 1, currency: "NGN" }),
     headers: { "content-type": "application/json", "x-test-signature": "0".repeat(64) },

@@ -69,6 +69,8 @@ Related: [Incident response and backup recovery](INCIDENT-RESPONSE.md).
 
 - **Next.js 15 bundled PostCSS advisories** (moderate/high in `npm audit`). They concern processing attacker-controlled CSS at build time; the app never processes user CSS. Fix: upgrade to Next.js 16 as a planned change with a full test run.
 - **Prisma CLI advisories** (`prisma`, `@prisma/config`, `deepmerge-ts`). These affect the migration tool's config loading, not the runtime client, and aren't reachable from requests. Fix: upgrade to Prisma 7 as a planned change.
+- **Build-tool advisories** (`npm audit`, 21 October 2026: 0 critical, 9 high, 3 moderate). All are in build or test tooling (Tailwind 3's file watcher and glob libraries, PostCSS inside Next.js's build, Prisma's config loader); none is part of the running server or reachable from a request. Vitest was upgraded to 5 to clear the two critical ones. Remaining fixes need Next.js 16, Prisma 7 and Tailwind 4, planned as separate upgrades (`docs/RUNBOOKS.md`, section 3).
+- **Live payments** are refused in code until `LIVE_PAYMENTS_APPROVED=true` is set in production after written go-live approval; staging can only use test keys.
 - **Encryption key rotation** is not automated. Rotating `APP_ENCRYPTION_KEY` needs a one-off re-encryption script.
 - **Malware scanning** of uploads is not needed while uploads are admin-only images that are re-encoded; revisit if members can upload documents.
 - **External penetration test** before go-live.

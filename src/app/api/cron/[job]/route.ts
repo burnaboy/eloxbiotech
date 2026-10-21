@@ -10,7 +10,8 @@ import { prisma } from "@/lib/db";
 import { reconcileVolume } from "@/lib/volume";
 import { refreshSalePrices } from "@/lib/catalog";
 import { recordJob } from "@/lib/health";
-import { logError } from "@/lib/log";
+import { log, logError } from "@/lib/log";
+import { reconcileGateway } from "@/lib/payments/gateway-reconciliation";
 
 /**
  * Scheduled jobs. Call with header "Authorization: Bearer $CRON_SECRET".
@@ -42,12 +43,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ job
   if (!authorized(req)) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const { job } = await params;
   await recordJob(job, { startedAt: new Date().toISOString() }).catch(() => undefined);
+  const started = Date.now();
   try {
     const res = await runJob(job, req);
     if (res.status < 400) await recordJob(job, { okAt: new Date().toISOString() }).catch(() => undefined);
+    log(res.status < 400 ? "info" : "warn", "cron.done", { job, status: res.status, ms: Date.now() - started });
     return res;
   } catch (e) {
-    logError(`cron ${job}`, e);
+    logError(`cron ${job}`, e, { job, ms: Date.now() - started });
     const message = e instanceof Error ? e.message : "failed";
     await recordJob(job, { failedAt: new Date().toISOString(), error: message.slice(0, 300) }).catch(() => undefined);
     return NextResponse.json({ error: message }, { status: 500 });
@@ -73,8 +76,16 @@ async function runJob(job: string, req: NextRequest): Promise<NextResponse> {
       }
       case "reconcile-volume": {
         const r = await reconcileVolume(null);
-        if (r.issueCount > 0) console.error(`volume reconciliation found ${r.issueCount} issue(s)`);
+        if (r.issueCount > 0) log("error", "reconcile.volume.mismatch", { issues: r.issueCount });
         return NextResponse.json({ nodes: r.nodes, orders: r.orders, issues: r.issueCount });
+      }
+      case "reconcile-gateway": {
+        // Paystack's successful transactions for the last two days against the payments recorded here.
+        if ((process.env.PAYMENT_PROVIDER ?? "test") !== "paystack") return NextResponse.json({ skipped: "not using Paystack" });
+        const to = new Date();
+        const r = await reconcileGateway(new Date(to.getTime() - 2 * 864e5), to);
+        if (!r.ok) log("error", "reconcile.gateway.mismatch", { problems: r.problemCount });
+        return NextResponse.json({ gateway: r.gatewayCount, recorded: r.recordedCount, problems: r.problemCount });
       }
       case "refresh-prices":
         return NextResponse.json({ changed: await refreshSalePrices(prisma) });
@@ -92,7 +103,7 @@ async function runJob(job: string, req: NextRequest): Promise<NextResponse> {
       }
       case "reconcile-ledger": {
         const r = await reconcileLedger();
-        if (!r.ok) console.error(`ledger reconciliation found ${r.problems.length} problem(s)`);
+        if (!r.ok) log("error", "reconcile.ledger.mismatch", { problems: r.problems.length });
         return NextResponse.json({ ok: r.ok, problems: r.problems.length, members: r.members });
       }
       case "seal-audit":

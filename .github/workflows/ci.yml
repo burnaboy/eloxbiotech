@@ -1,0 +1,73 @@
+# Runs every release check (docs/ACCEPTANCE.md) on each push and pull request, and builds the container image.
+# Uses only throwaway test values: no real keys are needed or used here.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release-checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: mlm
+          POSTGRES_PASSWORD: mlm
+          POSTGRES_DB: mlm
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U mlm" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      PGADMIN_URL: postgresql://mlm:mlm@localhost:5432
+      DATABASE_URL: postgresql://mlm:mlm@localhost:5432/mlm?schema=public
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install PostgreSQL 16 client
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSo /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt noble-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update && sudo apt-get install -y postgresql-client-16
+          echo "/usr/lib/postgresql/16/bin" >> "$GITHUB_PATH"
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Test databases
+        run: psql "$PGADMIN_URL/mlm" -c "CREATE DATABASE mlm_test" -c "CREATE DATABASE mlm_e2e"
+      - name: Release checks
+        run: scripts/release-check.sh
+      - name: Keep the evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-check
+          path: |
+            .release-check/
+            !.release-check/backup.dump
+            test-results/
+          retention-days: 30
+
+  container:
+    runs-on: ubuntu-24.04
+    needs: release-checks
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the app and migration images
+        run: |
+          docker build -t binary-commerce:${{ github.sha }} .
+          docker build --target migrate -t binary-commerce-migrate:${{ github.sha }} .
+      # Publishing the images to a registry is left for when a host is chosen (docs/DEPLOYMENT.md).

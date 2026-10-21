@@ -25,7 +25,8 @@ npx tsc --noEmit
 npx vitest run 2>&1 | tee "$OUT/vitest.txt" | tail -5
 grep -Eq "Tests +[0-9]+ passed" "$OUT/vitest.txt" && ! grep -Eq "[0-9]+ failed" "$OUT/vitest.txt" || fail "unit/integration tests"
 
-step "2. Migrations are reproducible"
+step "2. Migrations are safe and reproducible"
+npx tsx scripts/check-migrations.ts --all || fail "a destructive migration hasn't been approved"
 fresh mlm_repro_a; fresh mlm_repro_b
 DATABASE_URL=$(db mlm_repro_a) npx prisma migrate deploy >/dev/null
 DATABASE_URL=$(db mlm_repro_b) npx prisma migrate deploy >/dev/null
@@ -52,7 +53,7 @@ echo "scanned $(find "$BROWSER_FILES" -type f | wc -l) browser files: no secrets
 step "4. Browser tests against the production build, with the server log captured"
 fresh mlm_e2e
 E2E_ENV=(DATABASE_URL="$(db mlm_e2e)" APP_URL=http://localhost:3100 PAYMENT_PROVIDER=test ALLOW_TEST_PAYMENTS=true
-  TEST_PAYMENT_SECRET=e2e-secret CRON_SECRET=e2e-cron STORAGE_DRIVER=local ALLOW_LOCAL_STORAGE=true UPLOAD_DIR=.data/e2e-uploads
+  TEST_PAYMENT_SECRET=e2e-secret CRON_SECRET=e2e-cron MONITOR_TOKEN=e2e-monitor STORAGE_DRIVER=local ALLOW_LOCAL_STORAGE=true UPLOAD_DIR=.data/e2e-uploads
   APP_ENCRYPTION_KEY="$ENC_KEY" PAYSTACK_SECRET_KEY="$CANARY_PAYSTACK" S3_SECRET_ACCESS_KEY="$CANARY_S3")
 DATABASE_URL="$(db mlm_e2e)" npx prisma migrate deploy >/dev/null
 env "${E2E_ENV[@]}" node_modules/.bin/next start -p 3100 > "$OUT/server.log" 2>&1 &
@@ -66,7 +67,7 @@ kill $SERVER; wait $SERVER 2>/dev/null || true
 step "5. Logs don't expose credentials"
 # Passwords used by the browser tests, the secrets the server ran with, and live session tokens.
 SESSIONS=$(psql "$PG/mlm_e2e" -Atc 'SELECT string_agg("id", $$|$$) FROM "Session"' || true)
-LOG_PATTERNS="Password123|AdminPass123|buyerpass123|e2e-secret|e2e-cron|$CANARY_PAYSTACK|$CANARY_S3|mlm:mlm@|Bearer |sk_live_|$(printf %s "$ENC_KEY" | sed 's/[+/=]/./g')${SESSIONS:+|$SESSIONS}"
+LOG_PATTERNS="Password123|AdminPass123|buyerpass123|e2e-secret|e2e-cron|e2e-monitor|$CANARY_PAYSTACK|$CANARY_S3|mlm:mlm@|Bearer |sk_live_|$(printf %s "$ENC_KEY" | sed 's/[+/=]/./g')${SESSIONS:+|$SESSIONS}"
 if grep -Eq "$LOG_PATTERNS" "$OUT/server.log"; then grep -En "$LOG_PATTERNS" "$OUT/server.log" | head; fail "credential in server log"; fi
 echo "server log: $(wc -l < "$OUT/server.log") lines, no passwords, secrets, keys or session tokens"
 

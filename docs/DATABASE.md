@@ -93,6 +93,7 @@ Run by the scheduler through `POST /api/cron/<job>` with the `CRON_SECRET`. Each
 | `refresh-prices` | hourly | Sale prices that started or ended |
 | `binary` | daily | Binary run for the previous day (skipped while binary pay is off) |
 | `reconcile-ledger`, `reconcile-volume` | daily | Integrity checks; report only, never change data |
+| `reconcile-gateway` | daily | Paystack's successful transactions against recorded payments, both ways; report only |
 | `cleanup` | daily | Expired sessions, old sign-in attempts |
 
 Reports are computed on request from indexed, date-bounded queries; at larger scale, the revenue report can be backed by a nightly summary table.

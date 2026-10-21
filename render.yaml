@@ -1,0 +1,131 @@
+# Render Blueprint: staging and production for Binary Commerce (docs/HOSTING.md).
+# Each environment: one web service, one scheduler (cron), one managed PostgreSQL 16, all in Frankfurt.
+# Secrets marked `sync: false` are typed into the Render dashboard when the Blueprint is first applied;
+# they are never stored in this file or the repository.
+#
+# Staging deploys automatically from `main` once CI passes, and only ever uses Paystack test keys.
+# Production deploys only when someone presses Deploy, from the `production` branch.
+
+projects:
+  - name: binary-commerce
+    environments:
+      # ------------------------------------------------------------------ staging
+      - name: staging
+        services:
+          - type: web
+            name: bc-staging-web
+            runtime: node
+            region: frankfurt
+            plan: 0.5c-512mb
+            branch: main
+            autoDeployTrigger: checksPass
+            buildCommand: npm ci --include=dev && npx prisma generate && npm run build && cp -r .next/static .next/standalone/.next/static
+            preDeployCommand: npx tsx scripts/check-migrations.ts && npx prisma migrate deploy
+            startCommand: node .next/standalone/server.js
+            healthCheckPath: /api/health
+            envVars:
+              - { key: NODE_ENV, value: production }
+              - { key: APP_ENV, value: staging }
+              - { key: NODE_VERSION, value: "22" }
+              - { key: HOSTNAME, value: 0.0.0.0 }
+              - { key: TRUSTED_PROXY_HOPS, value: "1" }
+              - key: DATABASE_URL
+                fromDatabase: { name: bc-staging-db, property: connectionString }
+              - { key: APP_URL, sync: false }              # e.g. https://staging.yourdomain.ng
+              - { key: PAYMENT_PROVIDER, value: paystack }
+              - { key: PAYSTACK_SECRET_KEY, sync: false }  # sk_test_… only; the app refuses live keys in staging
+              - { key: PAYOUT_VERIFICATION, value: paystack }
+              - { key: APP_ENCRYPTION_KEY, generateValue: true }
+              - { key: CRON_SECRET, generateValue: true }
+              - { key: MONITOR_TOKEN, generateValue: true }
+              - { key: STORAGE_DRIVER, value: s3 }
+              - { key: S3_BUCKET, sync: false }
+              - { key: S3_REGION, value: auto }
+              - { key: S3_ENDPOINT, sync: false }
+              - { key: S3_ACCESS_KEY_ID, sync: false }
+              - { key: S3_SECRET_ACCESS_KEY, sync: false }
+              - { key: S3_PUBLIC_URL, sync: false }
+              - { key: ERROR_ALERT_WEBHOOK, sync: false }  # optional: team chat webhook for error alerts
+          - type: cron
+            name: bc-staging-scheduler
+            runtime: node
+            region: frankfurt
+            plan: 0.5c-512mb
+            branch: main
+            schedule: "* * * * *"
+            buildCommand: "true"
+            startCommand: node scripts/run-scheduled.mjs
+            envVars:
+              - { key: NODE_VERSION, value: "22" }
+              - key: APP_URL
+                fromService: { type: web, name: bc-staging-web, envVarKey: APP_URL }
+              - key: CRON_SECRET
+                fromService: { type: web, name: bc-staging-web, envVarKey: CRON_SECRET }
+        databases:
+          - name: bc-staging-db
+            postgresMajorVersion: "16"
+            region: frankfurt
+            plan: 0.1c-256mb
+            databaseName: binary_commerce
+            ipAllowList: []          # private network only
+
+      # --------------------------------------------------------------- production
+      - name: production
+        services:
+          - type: web
+            name: bc-prod-web
+            runtime: node
+            region: frankfurt
+            plan: 1c-2g
+            branch: production
+            autoDeployTrigger: "off"   # deploy by hand after the release checklist (docs/DEPLOYMENT.md)
+            buildCommand: npm ci --include=dev && npx prisma generate && npm run build && cp -r .next/static .next/standalone/.next/static
+            preDeployCommand: npx tsx scripts/check-migrations.ts && npx prisma migrate deploy
+            startCommand: node .next/standalone/server.js
+            healthCheckPath: /api/health
+            envVars:
+              - { key: NODE_ENV, value: production }
+              - { key: APP_ENV, value: production }
+              - { key: NODE_VERSION, value: "22" }
+              - { key: HOSTNAME, value: 0.0.0.0 }
+              - { key: TRUSTED_PROXY_HOPS, value: "1" }
+              - key: DATABASE_URL
+                fromDatabase: { name: bc-prod-db, property: connectionString }
+              - { key: APP_URL, sync: false }              # https://yourdomain.ng
+              - { key: PAYMENT_PROVIDER, value: paystack }
+              - { key: PAYSTACK_SECRET_KEY, sync: false }  # sk_test_… until go-live is approved
+              - { key: LIVE_PAYMENTS_APPROVED, value: "false" }  # set to true only with written go-live approval
+              - { key: PAYOUT_VERIFICATION, value: paystack }
+              - { key: APP_ENCRYPTION_KEY, generateValue: true }  # copy it to the offline backup straight away
+              - { key: CRON_SECRET, generateValue: true }
+              - { key: MONITOR_TOKEN, generateValue: true }
+              - { key: STORAGE_DRIVER, value: s3 }
+              - { key: S3_BUCKET, sync: false }
+              - { key: S3_REGION, value: auto }
+              - { key: S3_ENDPOINT, sync: false }
+              - { key: S3_ACCESS_KEY_ID, sync: false }
+              - { key: S3_SECRET_ACCESS_KEY, sync: false }
+              - { key: S3_PUBLIC_URL, sync: false }
+              - { key: ERROR_ALERT_WEBHOOK, sync: false }
+          - type: cron
+            name: bc-prod-scheduler
+            runtime: node
+            region: frankfurt
+            plan: 0.5c-512mb
+            branch: production
+            schedule: "* * * * *"
+            buildCommand: "true"
+            startCommand: node scripts/run-scheduled.mjs
+            envVars:
+              - { key: NODE_VERSION, value: "22" }
+              - key: APP_URL
+                fromService: { type: web, name: bc-prod-web, envVarKey: APP_URL }
+              - key: CRON_SECRET
+                fromService: { type: web, name: bc-prod-web, envVarKey: CRON_SECRET }
+        databases:
+          - name: bc-prod-db
+            postgresMajorVersion: "16"
+            region: frankfurt
+            plan: 0.5c-1g
+            databaseName: binary_commerce
+            ipAllowList: []          # private network only; add your IP briefly for a manual dump, then remove it

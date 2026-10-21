@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { prisma } from "@/lib/db";
 import { affiliate, buyAndPay, customer, makeRoot, product, resetDb, setPlan, bankAccount } from "./helpers";
 import { csvCell, toCsv } from "@/lib/csv";
@@ -126,5 +126,33 @@ describe("security helpers", () => {
     const { scrub } = await import("@/lib/log");
     const out = scrub('Invalid update { passwordHash: "$argon2id$v=19$m=1$abc$def", email: "ada@example.com" } key sk_live_abc123 Bearer eyJabc.def account 0123456789');
     for (const leak of ["$argon2id", "ada@example.com", "sk_live_abc123", "eyJabc", "0123456789"]) expect(out).not.toContain(leak);
+  });
+
+  it("writes one scrubbed JSON line per error in production format, and alerts once per burst", async () => {
+    const { logError } = await import("@/lib/log");
+    const lines: string[] = [];
+    const spy = vi.spyOn(console, "error").mockImplementation((l: string) => void lines.push(l));
+    const posts: string[] = [];
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (_u, init) => { posts.push(String(init?.body)); return new Response("ok"); });
+    process.env.LOG_FORMAT = "json";
+    process.env.ERROR_ALERT_WEBHOOK = "https://alerts.example/hook";
+    try {
+      const e = Object.assign(new Error('Invalid { "password": "hunter2hunter2", "email": "ada@example.com" } at postgresql://mlm:pw@db:5432/x'), { code: "P2002" });
+      logError("checkout", e, { orderId: "ord_1" });
+      logError("checkout", e);
+      await new Promise((r) => setTimeout(r, 10));
+    } finally {
+      spy.mockRestore(); fetchSpy.mockRestore();
+      delete process.env.LOG_FORMAT; delete process.env.ERROR_ALERT_WEBHOOK;
+    }
+    expect(lines).toHaveLength(2);
+    const rec = JSON.parse(lines[0]);
+    expect(rec).toMatchObject({ level: "error", event: "error", context: "checkout", code: "P2002", orderId: "ord_1" });
+    expect(typeof rec.time).toBe("string");
+    expect(posts).toHaveLength(1); // the second error within 5 minutes doesn't alert again
+    for (const leak of ["hunter2hunter2", "ada@example.com", "mlm:pw"]) {
+      expect(lines.join("\n")).not.toContain(leak);
+      expect(posts.join("\n")).not.toContain(leak);
+    }
   });
 });

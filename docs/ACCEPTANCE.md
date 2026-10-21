@@ -69,11 +69,14 @@ Files: `tests/*.test.ts` run with Vitest against a real PostgreSQL database; `e2
 | Criterion | Proven by (`scripts/release-check.sh` step) |
 | --- | --- |
 | Production builds succeed | 3: `next build` |
-| Database migrations are reproducible | 2: all migrations applied to two empty databases give identical schemas (constraints and triggers included), and match `schema.prisma` with no drift |
+| Database migrations are reproducible | 2: all migrations applied to two empty databases give identical schemas (constraints and triggers included), and match `schema.prisma` with no drift. Migrations that could destroy data are refused unless approved in writing (`scripts/check-migrations.ts`, also run before every deploy; `ops.test.ts`) |
 | Secrets are absent from frontend bundles | 3: the build runs with throwaway "canary" secret values; every browser file is searched for them, for key patterns (`sk_live_`, `sk_test_…`, `postgres://`, private keys), secret variable names, and server-only fields (password hashes, cost prices, encrypted bank numbers) |
 | Logs don't expose sensitive credentials | 5: the server log from the full browser run is searched for the test passwords, the secrets and encryption key it ran with, database credentials, bearer tokens and live session ids. `admin.test.ts` › scrubs secrets and personal data from logged errors |
 | Backup restoration is tested | 6: `pg_dump` of the browser-test database, restored into a new database; row counts match table by table, and the audit chain, wallet ledger and network volume checks pass on the restored copy (`scripts/verify-restore.ts`) |
-| Deployment and rollback instructions are documented | `docs/DEPLOYMENT.md`; restore procedure in `docs/INCIDENT-RESPONSE.md` |
+| Payments reconcile with Paystack | `acceptance.test.ts` › finds payments that differ between Paystack and our records, both ways, across pages (daily `reconcile-gateway` job) |
+| Live payments only after approval | `ops.test.ts` › accepts a live Paystack key only in production, outside staging, after explicit approval |
+| Structured, scrubbed logs and error alerts | `admin.test.ts` › writes one scrubbed JSON line per error…, and alerts once per burst |
+| Deployment and rollback instructions are documented | `docs/HOSTING.md`, `docs/DEPLOYMENT.md`, `docs/RUNBOOKS.md`; restore procedure in `docs/INCIDENT-RESPONSE.md`. The container image and the Render deploy steps were run locally (see `docs/PHASES.md`, phase 10) |
 
 ## Not covered by automated tests
 

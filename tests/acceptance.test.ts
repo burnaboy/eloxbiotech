@@ -278,3 +278,45 @@ describe("operations", () => {
     expect((await reconcileLedger()).ok).toBe(true);
   });
 });
+
+describe("payment reconciliation with Paystack", () => {
+  it("finds payments that differ between Paystack and our records, both ways, across pages", async () => {
+    process.env.PAYSTACK_SECRET_KEY = "sk_test_dummy";
+    const { reconcileGateway } = await import("@/lib/payments/gateway-reconciliation");
+    const root = await makeRoot();
+    const c = await customer(root.referralCode);
+    const p = await product({ stock: 50 });
+    // Four orders recorded with Paystack payments in various states.
+    const pays = [];
+    for (const [ref, status, amount] of [["R-OK", "SUCCEEDED", 7500], ["R-PENDING", "PENDING", 7500], ["R-AMOUNT", "SUCCEEDED", 7500], ["R-MISSING", "SUCCEEDED", 7500]] as const) {
+      await addToCart(c.id, p.id, 1);
+      const o = await createOrderFromCart(c.id, address);
+      pays.push(await prisma.payment.create({ data: { orderId: o.id, provider: "paystack", providerRef: ref, status, amountMinor: amount, currency: "NGN" } }));
+    }
+    // Paystack's side: 101 successful transactions over two pages (100 unrelated ones), one we've never seen.
+    const gateway = [
+      { id: 1, reference: "R-OK", status: "success", amount: 7500, currency: "NGN" },
+      { id: 2, reference: "R-PENDING", status: "success", amount: 7500, currency: "NGN" },
+      { id: 3, reference: "R-AMOUNT", status: "success", amount: 7000, currency: "NGN" },
+      { id: 4, reference: "R-UNKNOWN", status: "success", amount: 9900, currency: "NGN" },
+      ...Array.from({ length: 97 }, (_, i) => ({ id: 100 + i, reference: `R-OTHER-${i}`, status: "success", amount: 100, currency: "NGN" })),
+    ];
+    const urls: string[] = [];
+    const fetchImpl = (async (url: string, init?: RequestInit) => {
+      urls.push(url);
+      expect(init?.method ?? "GET").toBe("GET"); // read-only
+      const page = Number(new URL(url).searchParams.get("page"));
+      return new Response(JSON.stringify({ status: true, message: "ok", data: gateway.slice((page - 1) * 100, page * 100) }));
+    }) as typeof fetch;
+    const r = await reconcileGateway(new Date(Date.now() - 864e5), new Date(Date.now() + 60e3), { fetchImpl });
+    expect(urls).toHaveLength(2);
+    expect(urls[0]).toContain("status=success");
+    const kinds = Object.fromEntries(r.problems.filter((x) => !x.reference.startsWith("R-OTHER")).map((x) => [x.reference, x.kind]));
+    expect(kinds).toEqual({ "R-PENDING": "not_recorded_paid", "R-AMOUNT": "amount_mismatch", "R-UNKNOWN": "unknown_here", "R-MISSING": "not_paid_at_gateway" });
+    expect(r.ok).toBe(false);
+    expect(r.gatewayCount).toBe(101);
+    expect(await prisma.auditLog.count({ where: { action: "gateway.reconcile" } })).toBe(1);
+    // Nothing was changed: reconciliation only reports.
+    for (const pay of pays) expect((await prisma.payment.findUniqueOrThrow({ where: { id: pay.id } })).status).toBe(pay.status);
+  });
+});

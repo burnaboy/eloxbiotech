@@ -1,6 +1,6 @@
 # Deployment and rollback
 
-How to put Binary Commerce into service, release new versions, and undo a bad release. Restoring data from backups is in `docs/INCIDENT-RESPONSE.md`.
+How to put Binary Commerce into service, release new versions, and undo a bad release. The recommended host and its setup are in `docs/HOSTING.md`; this document applies to any host. Restoring data from backups is in `docs/INCIDENT-RESPONSE.md`.
 
 ## What runs where
 
@@ -24,12 +24,17 @@ Set these in the host's secret store, never in the repository. The app refuses u
 | `APP_URL` | yes | `https://your-domain` (turns on secure cookies and `upgrade-insecure-requests`) |
 | `APP_ENCRYPTION_KEY` | yes | 32 random bytes, base64 (`openssl rand -base64 32`). Encrypts bank numbers and two-step secrets. Keep an offline copy: without it they can't be read |
 | `CRON_SECRET` | yes | Long random string (`openssl rand -hex 32`) |
+| `MONITOR_TOKEN` | yes | Another long random string, for the external monitor (`docs/MONITORING.md`) |
 | `PAYMENT_PROVIDER` | yes | `paystack` |
 | `PAYSTACK_SECRET_KEY` | yes | `sk_live_…` in production only; `sk_test_…` everywhere else |
 | `PAYOUT_VERIFICATION` | no | `paystack` (default with Paystack) checks account names; `manual` skips |
 | `STORAGE_DRIVER` | yes | `s3` |
 | `S3_BUCKET`, `S3_REGION`, `S3_ENDPOINT`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_PUBLIC_URL` | yes | Key scoped to this one bucket. `S3_ENDPOINT` only for non-AWS (R2, Spaces, B2) |
 | `EMAIL_PROVIDER` | yes | Provider name once one is added (see above) |
+| `APP_ENV` | yes | `staging` or `production`. In staging the app refuses live Paystack keys; shown in error alerts |
+| `LIVE_PAYMENTS_APPROVED` | production | `false` until the business approves go-live in writing; a live key (`sk_live_…`) is refused until it's `true` |
+| `ERROR_ALERT_WEBHOOK` | no | Team chat webhook (Slack, Google Chat, Discord): one message per error type per 5 minutes, scrubbed |
+| `LOG_FORMAT` | no | `json` (default in production) or `text` |
 | `TRUSTED_PROXY_HOPS` | no | Number of proxies in front of the app that append `X-Forwarded-For` (default 1). Wrong values weaken rate limits |
 | `SEED_ADMIN_EMAIL`, `SEED_ADMIN_PASSWORD` | first deploy only | The first super admin. Remove after first sign-in |
 
@@ -52,6 +57,19 @@ ALTER DEFAULT PRIVILEGES FOR ROLE mlm_owner IN SCHEMA public GRANT USAGE, SELECT
 ```
 
 ## Build
+
+**Container (recommended).** The `Dockerfile` builds two images from the same commit: the web app, and a one-off migration job.
+
+```sh
+docker build -t binary-commerce:$(git rev-parse --short HEAD) .
+docker build --target migrate -t binary-commerce-migrate:$(git rev-parse --short HEAD) .
+docker run --rm -e DATABASE_URL=$DATABASE_MIGRATE_URL binary-commerce-migrate:<sha>   # release step 4
+docker run -p 3000:3000 --env-file <secrets> binary-commerce:<sha>                    # runs as a non-root user, with a health check
+```
+
+The CI pipeline (`.github/workflows/ci.yml`) runs `scripts/release-check.sh` on every push and pull request and builds both images.
+
+**Without containers:**
 
 ```sh
 npm ci
@@ -92,7 +110,10 @@ POST `https://<domain>/api/cron/<job>` with header `Authorization: Bearer $CRON_
 | `reconcile-payments`, `seal-audit` | every 10 minutes |
 | `mature-orders`, `refresh-prices` | hourly |
 | `binary` | daily 00:15 (skips itself while binary pay is off) |
-| `reconcile-ledger`, `reconcile-volume`, `cleanup` | daily 02:00 |
+| `reconcile-ledger`, `reconcile-volume`, `cleanup` | daily 02:00–02:20 |
+| `reconcile-gateway` | daily 03:00 (Paystack against our records; skipped with the test gateway) |
+
+On Render one scheduler runs `scripts/run-scheduled.mjs` every minute and calls whichever jobs are due (`render.yaml`, `docs/HOSTING.md`).
 
 Jobs are safe to run twice or overlap: each is idempotent and uses database locks (tested in `tests/acceptance.test.ts`, *operations*).
 
@@ -101,7 +122,7 @@ Jobs are safe to run twice or overlap: each is idempotent and uses database lock
 1. **Checks pass.** `scripts/release-check.sh` on the release commit: unit and integration tests, migrations from scratch, production build, secret scan of the browser files, browser tests against the production build, log scan, and a backup-restore test. Its evidence is in `.release-check/`.
 2. **Read the migrations** in the release (`git diff <live-tag> -- prisma/migrations`). Any that drop or rename a column or table, or rewrite data, need the two-step approach below.
 3. **Back up.** Note the time (PITR point) and take an on-demand snapshot: `pg_dump --format=custom --file=pre-release-<tag>.dump "$DATABASE_MIGRATE_URL"`.
-4. **Migrate**, as the owner: `DATABASE_URL=$DATABASE_MIGRATE_URL npx prisma migrate deploy`. The running version keeps working because migrations only add (see rules).
+4. **Migrate**, as the owner: `DATABASE_URL=$DATABASE_MIGRATE_URL npx tsx scripts/check-migrations.ts && DATABASE_URL=$DATABASE_MIGRATE_URL npx prisma migrate deploy` (on Render this is the `preDeployCommand`). The check refuses any pending migration that could destroy data unless it carries a written approval line (`docs/RUNBOOKS.md`, section 4). The running version keeps working because migrations only add (see rules).
 5. **Deploy** the new build with a rolling restart (instances replaced one at a time, each passing `/api/health` before the next).
 6. **Smoke test** (10 minutes): sign in as a member and as an admin; open the shop, a product, the cart; *Admin → System health* all green; Paystack webhook deliveries succeeding in the Paystack dashboard; no new errors in the logs.
 7. **Watch for an hour:** payment success rate in Paystack, error rate in the logs, *System health* job runs.

@@ -1,5 +1,6 @@
 import { prisma } from "./db";
 import { getOps } from "./settings";
+import { paystackSecretKey } from "./payments/keys";
 
 /*
  * System health for the admin "System health" page. Configuration checks report only whether a value
@@ -21,6 +22,7 @@ export const JOBS: Record<string, number> = {
   "reconcile-volume": 1440,
   cleanup: 1440,
   binary: 1440,
+  "reconcile-gateway": 1440,
 };
 
 type JobBeat = { startedAt?: string; okAt?: string; failedAt?: string; error?: string; result?: unknown };
@@ -53,15 +55,22 @@ function configChecks(): Check[] {
   const provider = env.PAYMENT_PROVIDER ?? "test";
   const key = env.PAYSTACK_SECRET_KEY ?? "";
   const keyMode = !key ? "not set" : key.startsWith("sk_test_") ? "test mode" : key.startsWith("sk_live_") ? "live mode" : "unrecognised format";
+  let keyProblem = "";
+  try {
+    paystackSecretKey(env);
+  } catch (e) {
+    keyProblem = e instanceof Error ? e.message : "invalid";
+  }
   const encKey = Buffer.from(env.APP_ENCRYPTION_KEY ?? "", "base64").length;
   return [
     {
       name: "Payment provider",
-      level: provider === "paystack" ? (key ? "ok" : "fail") : prod ? "warn" : "ok",
-      detail: provider === "paystack" ? `Paystack, secret key ${keyMode}` : `Test provider${prod ? " (no real payments are taken)" : ""}`,
+      level: provider === "paystack" ? (keyProblem ? "fail" : "ok") : prod ? "warn" : "ok",
+      detail: provider === "paystack" ? `Paystack, secret key ${keyMode}${keyProblem ? `: ${keyProblem}` : ""}` : `Test provider${prod ? " (no real payments are taken)" : ""}`,
     },
     { name: "App URL", level: env.APP_URL ? (prod && !env.APP_URL.startsWith("https://") ? "warn" : "ok") : "fail", detail: env.APP_URL ? (env.APP_URL.startsWith("https://") ? "Set, HTTPS" : "Set, not HTTPS") : "Not set: payment callbacks and email links will break" },
     { name: "Encryption key", level: encKey === 32 ? "ok" : "fail", detail: encKey === 32 ? "Set (256-bit)" : "Missing or wrong length: bank accounts can't be saved" },
+    { name: "Monitoring token", level: env.MONITOR_TOKEN ? "ok" : prod ? "warn" : "ok", detail: env.MONITOR_TOKEN ? "Set" : "Not set: the external monitor can't read detailed health" },
     { name: "Scheduled jobs secret", level: env.CRON_SECRET ? "ok" : "fail", detail: env.CRON_SECRET ? "Set" : "Not set: scheduled jobs are refused" },
     { name: "Email", level: (env.EMAIL_PROVIDER ?? "log") === "log" ? (prod ? "warn" : "ok") : "ok", detail: (env.EMAIL_PROVIDER ?? "log") === "log" ? "Not sending: emails are only stored" : `Sending via ${env.EMAIL_PROVIDER}` },
     { name: "File storage", level: (env.STORAGE_DRIVER ?? "local") === "local" && prod ? "warn" : "ok", detail: (env.STORAGE_DRIVER ?? "local") === "local" ? "Local disk" : "Object storage" },
@@ -83,7 +92,7 @@ export async function systemHealth() {
 
   const hourAgo = new Date(now.getTime() - 3600e3);
   const dayAgo = new Date(now.getTime() - 864e5);
-  const [migrations, stalePayments, stuckOrders, webhookProblems, unsentEmails, failedEmails, unsealed, lastLedger, lastAudit, lastVolume, failedRefunds, jobs, ops] = await Promise.all([
+  const [migrations, stalePayments, stuckOrders, webhookProblems, unsentEmails, failedEmails, unsealed, lastLedger, lastAudit, lastVolume, failedRefunds, lastGateway, jobs, ops] = await Promise.all([
     prisma.$queryRaw<{ unfinished: bigint }[]>`SELECT COUNT(*) AS unfinished FROM "_prisma_migrations" WHERE finished_at IS NULL OR rolled_back_at IS NOT NULL`.catch(() => [{ unfinished: BigInt(-1) }]),
     prisma.payment.count({ where: { status: "PENDING", createdAt: { lt: hourAgo } } }),
     prisma.order.count({ where: { status: "PAID", paidAt: { lt: new Date(now.getTime() - 3 * 864e5) } } }),
@@ -95,6 +104,7 @@ export async function systemHealth() {
     prisma.auditLog.findFirst({ where: { action: "audit.verify" }, orderBy: { seq: "desc" }, select: { createdAt: true, data: true } }),
     prisma.auditLog.findFirst({ where: { action: "volume.reconcile" }, orderBy: { seq: "desc" }, select: { createdAt: true, data: true } }),
     prisma.refund.count({ where: { status: "FAILED" } }),
+    prisma.auditLog.findFirst({ where: { action: "gateway.reconcile" }, orderBy: { seq: "desc" }, select: { createdAt: true, data: true } }),
     jobStatus(now),
     getOps(),
   ]);
@@ -114,6 +124,10 @@ export async function systemHealth() {
     { name: "Wallet ledger reconciliation", level: ledger ? (ledger.ok ? "ok" : "fail") : "warn", detail: ledger ? (ledger.ok ? `Balanced at ${lastLedger!.createdAt.toISOString()}` : `${ledger.problems ?? "Some"} problem(s) found`) : "Not run yet" },
     { name: "Volume reconciliation", level: vol ? ((vol.issueCount ?? vol.issues ?? 0) > 0 ? "fail" : "ok") : "warn", detail: vol ? `${vol.issueCount ?? vol.issues ?? 0} issue(s) at last run` : "Not run yet" },
   ];
+  const gw = lastGateway?.data as { ok?: boolean; problemCount?: number } | null;
+  if (gw || (process.env.PAYMENT_PROVIDER ?? "test") === "paystack") {
+    checks.push({ name: "Paystack reconciliation", level: gw ? (gw.ok ? "ok" : "fail") : "warn", detail: gw ? (gw.ok ? `Matches Paystack at ${lastGateway!.createdAt.toISOString()}` : `${gw.problemCount} payment(s) differ from Paystack`) : "Not run yet" });
+  }
   if (ops.payoutsPaused) checks.push({ name: "Withdrawals", level: "warn", detail: "Paused by a super administrator" });
   return { checks, jobs, counts: { stalePayments, stuckOrders, webhookProblems, unsealed }, ops };
 }

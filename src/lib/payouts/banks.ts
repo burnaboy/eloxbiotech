@@ -1,3 +1,4 @@
+import { paystackSecretKey } from "../payments/keys";
 import { GatewayError } from "../payments/types";
 
 /*
@@ -67,12 +68,7 @@ const manualDirectory: BankDirectory = {
   },
 };
 
-function paystackKey() {
-  const k = process.env.PAYSTACK_SECRET_KEY;
-  if (!k) throw new Error("PAYSTACK_SECRET_KEY is not set");
-  if (process.env.NODE_ENV !== "production" && !k.startsWith("sk_test_")) throw new Error("Use a Paystack test key (sk_test_...) outside production.");
-  return k;
-}
+const paystackKey = () => paystackSecretKey();
 
 async function paystackGet<T>(path: string): Promise<T> {
   let res: Response;

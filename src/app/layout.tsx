@@ -10,7 +10,11 @@ export const dynamic = "force-dynamic";
 
 export async function generateMetadata(): Promise<Metadata> {
   const brand = await getBrand();
-  return { title: { default: brand.companyName, template: `%s · ${brand.companyName}` }, description: brand.tagline };
+  return {
+    metadataBase: process.env.APP_URL ? new URL(process.env.APP_URL) : undefined,
+    title: { default: brand.companyName, template: `%s · ${brand.companyName}` },
+    description: brand.tagline,
+  };
 }
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
