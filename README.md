@@ -63,3 +63,8 @@ Create the test databases once: `createdb mlm_test && createdb mlm_e2e` (same us
 | [ADMIN-GUIDE.md](docs/ADMIN-GUIDE.md) | Day-to-day running for the operations team |
 | [ACCEPTANCE.md](docs/ACCEPTANCE.md) | Release criteria and the tests that prove them |
 | [PHASES.md](docs/PHASES.md) | Delivery report by phase, with results and open risks |
+| [API.md](docs/API.md) | HTTP endpoints, webhooks, scheduled jobs, server actions |
+| [SECURITY-CHECKLIST.md](docs/SECURITY-CHECKLIST.md) | Pre-launch security checklist: built controls and open items |
+| [TEST-REPORT.md](docs/TEST-REPORT.md) | Results of the latest full release check |
+| [READINESS.md](docs/READINESS.md) | Known limitations and production-readiness assessment |
+| [DELIVERABLES.md](docs/DELIVERABLES.md) | Where each required deliverable lives |
