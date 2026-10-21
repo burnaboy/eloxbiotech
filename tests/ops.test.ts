@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { paystackSecretKey } from "@/lib/payments/keys";
+import { paystackSecretKey, testPaymentsAllowed } from "@/lib/payments/keys";
 import { problems } from "../scripts/check-migrations";
 // @ts-expect-error plain JavaScript module without type declarations
 import { dueJobs } from "../scripts/run-scheduled.mjs";
@@ -15,6 +15,16 @@ describe("go-live safeguards", () => {
     expect(paystackSecretKey({ NODE_ENV: "production", PAYSTACK_SECRET_KEY: live, LIVE_PAYMENTS_APPROVED: "true" } as NodeJS.ProcessEnv)).toBe(live);
     expect(() => paystackSecretKey({ NODE_ENV: "production", PAYSTACK_SECRET_KEY: "pk_live_abc" } as NodeJS.ProcessEnv)).toThrow(/doesn't look/);
     expect(() => paystackSecretKey({ NODE_ENV: "production" } as NodeJS.ProcessEnv)).toThrow(/not set/);
+  });
+
+  it("never allows the simulated payment gateway in the real production environment", () => {
+    const allowed = (env: Record<string, string>) => testPaymentsAllowed(env as unknown as NodeJS.ProcessEnv);
+    expect(allowed({ NODE_ENV: "development" })).toBe(true);
+    expect(allowed({ NODE_ENV: "test" })).toBe(true);
+    expect(allowed({ NODE_ENV: "production" })).toBe(false);
+    expect(allowed({ NODE_ENV: "production", APP_ENV: "staging", ALLOW_TEST_PAYMENTS: "true" })).toBe(true);
+    expect(allowed({ NODE_ENV: "production", APP_ENV: "production", ALLOW_TEST_PAYMENTS: "true" })).toBe(false);
+    expect(allowed({ NODE_ENV: "production", ALLOW_TEST_PAYMENTS: "true", LIVE_PAYMENTS_APPROVED: "true" })).toBe(false);
   });
 
   it("blocks destructive migrations unless approved in writing", () => {

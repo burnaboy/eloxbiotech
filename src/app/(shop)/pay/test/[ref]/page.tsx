@@ -5,13 +5,14 @@ import { requireUser } from "@/lib/session";
 import { formatMoney } from "@/lib/money";
 import { buildTestEvent, testProvider } from "@/lib/payments/test-provider";
 import { applyPaymentEvent } from "@/lib/payments/service";
+import { testPaymentsAllowed } from "@/lib/payments/keys";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 export const metadata = { title: "Test payment" };
 
 function guard() {
-  if (process.env.NODE_ENV === "production" && process.env.ALLOW_TEST_PAYMENTS !== "true") notFound();
+  if (!testPaymentsAllowed()) notFound();
 }
 
 async function simulate(ref: string, outcome: "succeeded" | "failed") {

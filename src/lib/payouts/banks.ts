@@ -1,4 +1,4 @@
-import { paystackSecretKey } from "../payments/keys";
+import { paystackSecretKey, testPaymentsAllowed } from "../payments/keys";
 import { GatewayError } from "../payments/types";
 
 /*
@@ -109,6 +109,6 @@ export function bankDirectory(): BankDirectory {
   const mode = process.env.PAYOUT_VERIFICATION ?? (process.env.PAYMENT_PROVIDER === "paystack" ? "paystack" : "test");
   if (mode === "paystack") return paystackDirectory;
   if (mode === "manual") return manualDirectory;
-  if (process.env.NODE_ENV === "production" && process.env.ALLOW_TEST_PAYMENTS !== "true") return manualDirectory;
+  if (!testPaymentsAllowed()) return manualDirectory;
   return testDirectory;
 }

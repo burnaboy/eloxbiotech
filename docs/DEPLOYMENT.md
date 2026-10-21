@@ -38,7 +38,7 @@ Set these in the host's secret store, never in the repository. The app refuses u
 | `TRUSTED_PROXY_HOPS` | no | Number of proxies in front of the app that append `X-Forwarded-For` (default 1). Wrong values weaken rate limits |
 | `SEED_ADMIN_EMAIL`, `SEED_ADMIN_PASSWORD` | first deploy only | The first super admin. Remove after first sign-in |
 
-Never set in production: `ALLOW_TEST_PAYMENTS`, `ALLOW_LOCAL_STORAGE`, `TEST_PAYMENT_SECRET`, `SEED_DEMO`.
+Never set in production: `ALLOW_TEST_PAYMENTS`, `ALLOW_LOCAL_STORAGE`, `TEST_PAYMENT_SECRET`, `SEED_DEMO`, `SEED_SAMPLE_PRODUCTS`. The code refuses the simulated payment gateway whenever `APP_ENV=production` or live payments are approved, and the seed script refuses sample products and demo members there.
 
 ## Database roles
 
@@ -91,7 +91,7 @@ Tag every build with the git commit (for example as the image tag) so a rollback
 
 1. Create the database (PITR on), the bucket (versioning on) and the secrets above.
 2. Run migrations as the owner: `DATABASE_URL=$DATABASE_MIGRATE_URL npx prisma migrate deploy`.
-3. Create the first super admin and the catalogue defaults: `SEED_ADMIN_EMAIL=… SEED_ADMIN_PASSWORD=… npx tsx prisma/seed.ts`. It never creates demo members in production.
+3. Create the first super admin and the product categories: `SEED_ADMIN_EMAIL=… SEED_ADMIN_PASSWORD=… npx tsx prisma/seed.ts`. In production it creates no sample products and no demo members; add the real catalogue in *Admin → Products*. (On staging, add `SEED_SAMPLE_PRODUCTS=1` for sample products to test with.)
 4. Start the app; `GET /api/health` must return `{"ok":true}`.
 5. Sign in as the super admin, set up two-step verification, change the password, then remove `SEED_ADMIN_PASSWORD` from the environment.
 6. In Paystack: set the webhook URL to `https://<domain>/api/webhooks/paystack`, and the callback URL to `https://<domain>/checkout/callback`.

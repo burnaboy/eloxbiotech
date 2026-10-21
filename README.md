@@ -68,3 +68,4 @@ Create the test databases once: `createdb mlm_test && createdb mlm_e2e` (same us
 | [TEST-REPORT.md](docs/TEST-REPORT.md) | Results of the latest full release check |
 | [READINESS.md](docs/READINESS.md) | Known limitations and production-readiness assessment |
 | [DELIVERABLES.md](docs/DELIVERABLES.md) | Where each required deliverable lives |
+| [COMMANDS.md](docs/COMMANDS.md) | Exact commands: local development, migrations, tests, build, deployment |

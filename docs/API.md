@@ -9,7 +9,7 @@ All endpoints are served from `APP_URL`. Responses are JSON unless stated. Times
 | Method and path | Caller | Auth |
 | --- | --- | --- |
 | `POST /api/webhooks/paystack` | Paystack | `x-paystack-signature` (HMAC-SHA512 of the raw body with the secret key) |
-| `POST /api/webhooks/test` | Built-in test gateway (development, staging rehearsal) | `x-test-signature` (HMAC with `TEST_PAYMENT_SECRET`); refused in production unless `ALLOW_TEST_PAYMENTS=true` |
+| `POST /api/webhooks/test` | Built-in test gateway (development, staging rehearsal) | `x-test-signature` (HMAC with `TEST_PAYMENT_SECRET`); refused in production builds unless `ALLOW_TEST_PAYMENTS=true`, and always refused when `APP_ENV=production` |
 | `POST /api/cron/{job}` | Scheduler | `Authorization: Bearer $CRON_SECRET` |
 | `GET /api/health` | Load balancer, container | None |
 | `GET /api/health/status` | Uptime monitor | `Authorization: Bearer $MONITOR_TOKEN` |

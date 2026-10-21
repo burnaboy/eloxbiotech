@@ -17,3 +17,15 @@ export function paystackSecretKey(env: NodeJS.ProcessEnv = process.env) {
   }
   return k;
 }
+
+/**
+ * Whether the built-in simulated gateway (development and automated tests only) may be used.
+ * Always on outside production. In a production build it needs ALLOW_TEST_PAYMENTS=true, and is
+ * refused outright in the real production environment (APP_ENV=production) or once live payments
+ * are approved, so a stray setting can never mark a real order paid without Paystack.
+ */
+export function testPaymentsAllowed(env: NodeJS.ProcessEnv = process.env) {
+  if (env.NODE_ENV !== "production") return true;
+  if (env.APP_ENV === "production" || env.LIVE_PAYMENTS_APPROVED === "true") return false;
+  return env.ALLOW_TEST_PAYMENTS === "true";
+}

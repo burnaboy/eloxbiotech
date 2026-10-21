@@ -1,6 +1,6 @@
 /**
  * Seeds the minimum a fresh install needs: a super administrator (who is also the top of the network),
- * product categories and clearly-labelled sample products. Safe to run more than once.
+ * product categories and, outside production, clearly-labelled sample products. Safe to run more than once.
  * Set SEED_DEMO=1 to also create demo members for local testing (never in production).
  */
 import { randomBytes } from "node:crypto";
@@ -48,9 +48,15 @@ async function main() {
     await prisma.affiliateNode.create({ data: { userId: admin.id, ancestorIds: [] } });
   }
 
+  // Sample products are development fixtures. In a production build (staging and production) they are
+  // only created with SEED_SAMPLE_PRODUCTS=1, and never in the real production environment.
+  const prod = process.env.NODE_ENV === "production";
+  if (process.env.APP_ENV === "production" && process.env.SEED_SAMPLE_PRODUCTS === "1") throw new Error("Refusing to seed sample products in production.");
+  const samples = !prod || process.env.SEED_SAMPLE_PRODUCTS === "1";
+
   for (const c of CATEGORIES) await prisma.category.upsert({ where: { slug: c.slug }, create: c, update: {} });
   const cats = new Map((await prisma.category.findMany()).map((c) => [c.slug, c.id]));
-  for (const p of PRODUCTS) {
+  for (const p of samples ? PRODUCTS : []) {
     const slug = p.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
     const exists = await prisma.product.findUnique({ where: { sku: p.sku } });
     if (exists) continue;
@@ -64,7 +70,7 @@ async function main() {
     await prisma.inventoryMovement.create({ data: { productId: created.id, delta: p.stock, balance: p.stock, reason: "RESTOCK", note: "Seed stock" } });
   }
   // One sample product with options, to show how sizes work.
-  if (!(await prisma.product.findUnique({ where: { sku: "SAMPLE-009" } }))) {
+  if (samples && !(await prisma.product.findUnique({ where: { sku: "SAMPLE-009" } }))) {
     const withOptions = await prisma.product.create({
       data: {
         sku: "SAMPLE-009", slug: "sample-product-with-sizes", name: "Sample product with sizes", priceMinor: 600000, listPriceMinor: 600000, pv: 30,

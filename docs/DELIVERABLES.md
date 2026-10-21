@@ -28,7 +28,7 @@ Where each required deliverable lives in this repository. Paths are from the rep
 | 22 | Test report | `docs/TEST-REPORT.md`; raw output in `.release-check/` | Done |
 | 23 | Known limitations and production-readiness assessment | `docs/READINESS.md` | Done |
 
-Also included: `docs/COMPLIANCE.md` (legal questions for a Nigerian lawyer), `docs/ADMIN-GUIDE.md` (day-to-day running), `docs/ACCEPTANCE.md` (each acceptance criterion and its test), `docs/PHASES.md` (delivery report by phase).
+Also included: `docs/COMMANDS.md` (exact commands for every stage), `docs/COMPLIANCE.md` (legal questions for a Nigerian lawyer), `docs/ADMIN-GUIDE.md` (day-to-day running), `docs/ACCEPTANCE.md` (each acceptance criterion and its test), `docs/PHASES.md` (delivery report by phase).
 
 ## Folder structure
 

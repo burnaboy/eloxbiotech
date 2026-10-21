@@ -48,7 +48,7 @@ From Render's published prices (checked 21 October 2026, US dollars, before tax;
 2. In Render: *New → Blueprint*, choose the repository. Render reads `render.yaml` and asks for each secret marked `sync: false` (Paystack test key, bucket keys, `APP_URL`, the optional error webhook). Use **test** Paystack keys in both environments.
 3. Render generates `APP_ENCRYPTION_KEY`, `CRON_SECRET` and `MONITOR_TOKEN`. **Copy each environment's `APP_ENCRYPTION_KEY` to the offline backup now** (two sealed copies): without it, saved bank account numbers can't be read after a restore.
 4. Custom domains: add them on each web service; Render issues and renews the HTTPS certificates. Point DNS as Render shows. Then set `APP_URL` to the `https://` address and redeploy.
-5. First super admin: open the web service's *Shell* and run `SEED_ADMIN_EMAIL=you@… SEED_ADMIN_PASSWORD='…' npx tsx prisma/seed.ts`. Sign in, set up two-step verification, change the password.
+5. First super admin: open the web service's *Shell* and run `SEED_ADMIN_EMAIL=you@… SEED_ADMIN_PASSWORD='…' npx tsx prisma/seed.ts` (on staging, add `SEED_SAMPLE_PRODUCTS=1` for sample products; production gets none). Sign in, set up two-step verification, change the password.
 6. Paystack dashboard (test mode first): webhook URL `https://<domain>/api/webhooks/paystack`, callback URL `https://<domain>/checkout/callback`.
 7. Monitoring: point the uptime monitor and alerts at the two health endpoints (`docs/MONITORING.md`), and set `ERROR_ALERT_WEBHOOK` to a team chat webhook.
 8. Go through the go-live checklist below on staging, then on production.

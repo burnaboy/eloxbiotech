@@ -18,6 +18,7 @@ Status as of 21 October 2026.
 | 8 | Paystack webhooks: HMAC-SHA512 signature in constant time, then every success re-verified with Paystack | Done | `paystack.test.ts`, `e2e/04-access` (forged webhook gets 401) |
 | 9 | Amount, currency and reference must match before an order is paid; repeats change nothing | Done | `flow.test.ts`, `money.test.ts`, `acceptance.test.ts` |
 | 10 | Live Paystack keys refused unless production, not staging, and `LIVE_PAYMENTS_APPROVED=true` | Done | `ops.test.ts` |
+| 10a | Simulated payment gateway refused in the live environment (`APP_ENV=production`) or once live payments are approved; no sample products or demo members seeded in production | Done | `ops.test.ts`; seed checked on a scratch database |
 | 11 | Prices, totals, VAT and delivery computed on the server from the database | Done | `acceptance.test.ts`, `catalog.test.ts` |
 | 12 | Stock can't be oversold, even with simultaneous checkouts | Done | `catalog.test.ts`, `flow.test.ts` |
 | 13 | Wallet ledger is append-only (database trigger), idempotency keys unique | Done | `money.test.ts`, `acceptance.test.ts` |
