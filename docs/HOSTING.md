@@ -16,9 +16,9 @@ The app is a plain Node/Docker application, so it can move later (Fly.io, Railwa
 | --- | --- | --- |
 | Purpose | Rehearse every release; Paystack **test mode** only | Real customers |
 | Branch and deploys | `main`, automatically once CI passes | `production`, by hand after the release checklist |
-| Web service | `bc-staging-web` (0.5 CPU, 512 MB) | `bc-prod-web` (1 CPU, 2 GB) |
-| Scheduler | `bc-staging-scheduler`: every minute runs `scripts/run-scheduled.mjs`, which calls the jobs that are due | `bc-prod-scheduler`, same |
-| Database | `bc-staging-db`, PostgreSQL 16, smallest paid size | `bc-prod-db`, PostgreSQL 16, 1 GB RAM |
+| Web service | `elox-staging-web` (0.5 CPU, 512 MB) | `elox-prod-web` (1 CPU, 2 GB) |
+| Scheduler | `elox-staging-scheduler`: every minute runs `scripts/run-scheduled.mjs`, which calls the jobs that are due | `elox-prod-scheduler`, same |
+| Database | `elox-staging-db`, PostgreSQL 16, smallest paid size | `elox-prod-db`, PostgreSQL 16, 1 GB RAM |
 | Database network | Private only (no public access) | Private only |
 | Paystack | `sk_test_…`; the app refuses a live key here | `sk_test_…` until go-live, then `sk_live_…` with `LIVE_PAYMENTS_APPROVED=true` |
 | Domain | `staging.<your-domain>` | `<your-domain>` and `www.` |

@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import sharp from "sharp";
 import { db, signIn, totpFor } from "./helpers";
 
-const ADMIN = "admin@binarycommerce.local";
+const ADMIN = "admin@eloxbiotech.local";
 
 test("super admin must set up two-step verification, then can ship an order and needs a fresh code to refund", async ({ page }) => {
   await signIn(page, ADMIN, "AdminPass123");

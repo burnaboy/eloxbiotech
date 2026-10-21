@@ -1,4 +1,4 @@
-# Binary Commerce
+# Elox BioTech
 
 An online shop for Nigeria (prices in naira, payments through Paystack) with an affiliate programme: members earn commission on genuine product sales to customers they refer, tracked in a binary (two-leg) team tree. Built with Next.js 15, PostgreSQL 16 and Prisma.
 
@@ -20,7 +20,7 @@ docker run -d --name mlm-db -p 5432:5432 -e POSTGRES_USER=mlm -e POSTGRES_PASSWO
 cp .env.example .env            # test-mode values only; set APP_ENCRYPTION_KEY with: openssl rand -base64 32
 npm ci
 npx prisma migrate deploy
-SEED_ADMIN_PASSWORD='choose-one' SEED_DEMO=1 npm run seed    # admin@binarycommerce.local plus demo members (password Password123)
+SEED_ADMIN_PASSWORD='choose-one' SEED_DEMO=1 npm run seed    # admin@eloxbiotech.local plus demo members (password Password123)
 npm run dev                     # http://localhost:3000
 ```
 

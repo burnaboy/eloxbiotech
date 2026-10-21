@@ -68,6 +68,6 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build the app and migration images
         run: |
-          docker build -t binary-commerce:${{ github.sha }} .
-          docker build --target migrate -t binary-commerce-migrate:${{ github.sha }} .
+          docker build -t elox-biotech:${{ github.sha }} .
+          docker build --target migrate -t elox-biotech-migrate:${{ github.sha }} .
       # Publishing the images to a registry is left for when a host is chosen (docs/DEPLOYMENT.md).

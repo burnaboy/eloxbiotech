@@ -130,7 +130,7 @@ export const brandSchema = z.object({
 });
 export type Brand = z.infer<typeof brandSchema>;
 export const DEFAULT_BRAND: Brand = {
-  companyName: "Binary Commerce",
+  companyName: "Elox BioTech",
   tagline: "Genuine products, rewarded fairly.",
   logoUrl: "",
   primaryColor: "#0f5132",

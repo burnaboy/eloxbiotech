@@ -30,7 +30,7 @@ const PRODUCTS = [
 async function main() {
   if (process.env.NODE_ENV === "production" && process.env.SEED_DEMO === "1") throw new Error("Refusing to seed demo members in production.");
 
-  const email = (process.env.SEED_ADMIN_EMAIL ?? "admin@binarycommerce.local").toLowerCase();
+  const email = (process.env.SEED_ADMIN_EMAIL ?? "admin@eloxbiotech.local").toLowerCase();
   let admin = await prisma.user.findUnique({ where: { email } });
   if (!admin) {
     const password = process.env.SEED_ADMIN_PASSWORD ?? randomBytes(12).toString("base64url");

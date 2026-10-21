@@ -16,6 +16,6 @@ describe("two-step codes", () => {
   it("makes 160-bit secrets and a standard otpauth link", () => {
     const s = generateSecret();
     expect(s).toMatch(/^[A-Z2-7]{32}$/);
-    expect(otpauthUri(s, "ada@example.com", "Binary Commerce")).toMatch(/^otpauth:\/\/totp\/Binary%20Commerce:ada%40example\.com\?.*secret=/);
+    expect(otpauthUri(s, "ada@example.com", "Elox BioTech")).toMatch(/^otpauth:\/\/totp\/Elox%20BioTech:ada%40example\.com\?.*secret=/);
   });
 });

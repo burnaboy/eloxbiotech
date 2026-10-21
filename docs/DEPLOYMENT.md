@@ -1,6 +1,6 @@
 # Deployment and rollback
 
-How to put Binary Commerce into service, release new versions, and undo a bad release. The recommended host and its setup are in `docs/HOSTING.md`; this document applies to any host. Restoring data from backups is in `docs/INCIDENT-RESPONSE.md`.
+How to put Elox BioTech into service, release new versions, and undo a bad release. The recommended host and its setup are in `docs/HOSTING.md`; this document applies to any host. Restoring data from backups is in `docs/INCIDENT-RESPONSE.md`.
 
 ## What runs where
 
@@ -61,10 +61,10 @@ ALTER DEFAULT PRIVILEGES FOR ROLE mlm_owner IN SCHEMA public GRANT USAGE, SELECT
 **Container (recommended).** The `Dockerfile` builds two images from the same commit: the web app, and a one-off migration job.
 
 ```sh
-docker build -t binary-commerce:$(git rev-parse --short HEAD) .
-docker build --target migrate -t binary-commerce-migrate:$(git rev-parse --short HEAD) .
-docker run --rm -e DATABASE_URL=$DATABASE_MIGRATE_URL binary-commerce-migrate:<sha>   # release step 4
-docker run -p 3000:3000 --env-file <secrets> binary-commerce:<sha>                    # runs as a non-root user, with a health check
+docker build -t elox-biotech:$(git rev-parse --short HEAD) .
+docker build --target migrate -t elox-biotech-migrate:$(git rev-parse --short HEAD) .
+docker run --rm -e DATABASE_URL=$DATABASE_MIGRATE_URL elox-biotech-migrate:<sha>   # release step 4
+docker run -p 3000:3000 --env-file <secrets> elox-biotech:<sha>                    # runs as a non-root user, with a health check
 ```
 
 The CI pipeline (`.github/workflows/ci.yml`) runs `scripts/release-check.sh` on every push and pull request and builds both images.

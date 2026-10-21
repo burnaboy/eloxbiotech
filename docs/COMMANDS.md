@@ -19,7 +19,7 @@ SEED_ADMIN_PASSWORD='choose-a-password' SEED_DEMO=1 npm run seed
 npm run dev                      # http://localhost:3000
 ```
 
-- Admin: `admin@binarycommerce.local` with the password you chose; two-step setup is required on first visit to `/admin`.
+- Admin: `admin@eloxbiotech.local` with the password you chose; two-step setup is required on first visit to `/admin`.
 - Demo members (development fixtures, password `Password123`): `ada@demo.local` (affiliate), `bayo@demo.local`, `chi@demo.local`, `dami@demo.local` (customer).
 - Payments go through the built-in simulated gateway (`PAYMENT_PROVIDER=test`), which works only in development, tests and staging rehearsals. To try Paystack's test mode, set `PAYMENT_PROVIDER=paystack` and an `sk_test_…` key in `.env`.
 - Scheduled jobs locally, in a second terminal: `APP_URL=http://localhost:3000 CRON_SECRET=dev-only-cron-secret node scripts/run-scheduled.mjs`
@@ -74,8 +74,8 @@ NODE_ENV=production PORT=3000 node .next/standalone/server.js
 Or as containers:
 
 ```sh
-docker build -t binary-commerce:$(git rev-parse --short HEAD) .
-docker build --target migrate -t binary-commerce-migrate:$(git rev-parse --short HEAD) .
+docker build -t elox-biotech:$(git rev-parse --short HEAD) .
+docker build --target migrate -t elox-biotech-migrate:$(git rev-parse --short HEAD) .
 ```
 
 Production needs the variables listed in `docs/DEPLOYMENT.md` (Environment variables); the app refuses to start a payment with missing or wrong-mode keys.
@@ -91,7 +91,7 @@ git push -u origin main
 git push origin main:production      # the production service deploys from this branch
 ```
 
-2. In Render: *New → Blueprint*, choose the repository. Render reads `render.yaml` and creates staging (`bc-staging-*`) and production (`bc-prod-*`) web services, schedulers and databases in Frankfurt.
+2. In Render: *New → Blueprint*, choose the repository. Render reads `render.yaml` and creates staging (`elox-staging-*`) and production (`elox-prod-*`) web services, schedulers and databases in Frankfurt.
 3. Fill in each `sync: false` secret in the Render dashboard. Use **test** Paystack keys on both environments. Leave `LIVE_PAYMENTS_APPROVED=false`.
 4. First super admin, from the web service's *Shell*:
 

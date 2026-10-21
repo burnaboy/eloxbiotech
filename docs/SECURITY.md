@@ -1,6 +1,6 @@
 # Security and threat model
 
-This document describes who might attack Binary Commerce, what they would want, and the controls that stop them. It reflects the code as built; items marked **Open** are known gaps with a plan.
+This document describes who might attack Elox BioTech, what they would want, and the controls that stop them. It reflects the code as built; items marked **Open** are known gaps with a plan.
 
 Related: [Incident response and backup recovery](INCIDENT-RESPONSE.md).
 

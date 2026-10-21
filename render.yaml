@@ -1,4 +1,4 @@
-# Render Blueprint: staging and production for Binary Commerce (docs/HOSTING.md).
+# Render Blueprint: staging and production for Elox BioTech (docs/HOSTING.md).
 # Each environment: one web service, one scheduler (cron), one managed PostgreSQL 16, all in Frankfurt.
 # Secrets marked `sync: false` are typed into the Render dashboard when the Blueprint is first applied;
 # they are never stored in this file or the repository.
@@ -7,13 +7,13 @@
 # Production deploys only when someone presses Deploy, from the `production` branch.
 
 projects:
-  - name: binary-commerce
+  - name: elox-biotech
     environments:
       # ------------------------------------------------------------------ staging
       - name: staging
         services:
           - type: web
-            name: bc-staging-web
+            name: elox-staging-web
             runtime: node
             region: frankfurt
             plan: 0.5c-512mb
@@ -30,7 +30,7 @@ projects:
               - { key: HOSTNAME, value: 0.0.0.0 }
               - { key: TRUSTED_PROXY_HOPS, value: "1" }
               - key: DATABASE_URL
-                fromDatabase: { name: bc-staging-db, property: connectionString }
+                fromDatabase: { name: elox-staging-db, property: connectionString }
               - { key: APP_URL, sync: false }              # e.g. https://staging.yourdomain.ng
               - { key: PAYMENT_PROVIDER, value: paystack }
               - { key: PAYSTACK_SECRET_KEY, sync: false }  # sk_test_… only; the app refuses live keys in staging
@@ -47,7 +47,7 @@ projects:
               - { key: S3_PUBLIC_URL, sync: false }
               - { key: ERROR_ALERT_WEBHOOK, sync: false }  # optional: team chat webhook for error alerts
           - type: cron
-            name: bc-staging-scheduler
+            name: elox-staging-scheduler
             runtime: node
             region: frankfurt
             plan: 0.5c-512mb
@@ -58,11 +58,11 @@ projects:
             envVars:
               - { key: NODE_VERSION, value: "22" }
               - key: APP_URL
-                fromService: { type: web, name: bc-staging-web, envVarKey: APP_URL }
+                fromService: { type: web, name: elox-staging-web, envVarKey: APP_URL }
               - key: CRON_SECRET
-                fromService: { type: web, name: bc-staging-web, envVarKey: CRON_SECRET }
+                fromService: { type: web, name: elox-staging-web, envVarKey: CRON_SECRET }
         databases:
-          - name: bc-staging-db
+          - name: elox-staging-db
             postgresMajorVersion: "16"
             region: frankfurt
             plan: 0.1c-256mb
@@ -73,7 +73,7 @@ projects:
       - name: production
         services:
           - type: web
-            name: bc-prod-web
+            name: elox-prod-web
             runtime: node
             region: frankfurt
             plan: 1c-2g
@@ -90,7 +90,7 @@ projects:
               - { key: HOSTNAME, value: 0.0.0.0 }
               - { key: TRUSTED_PROXY_HOPS, value: "1" }
               - key: DATABASE_URL
-                fromDatabase: { name: bc-prod-db, property: connectionString }
+                fromDatabase: { name: elox-prod-db, property: connectionString }
               - { key: APP_URL, sync: false }              # https://yourdomain.ng
               - { key: PAYMENT_PROVIDER, value: paystack }
               - { key: PAYSTACK_SECRET_KEY, sync: false }  # sk_test_… until go-live is approved
@@ -108,7 +108,7 @@ projects:
               - { key: S3_PUBLIC_URL, sync: false }
               - { key: ERROR_ALERT_WEBHOOK, sync: false }
           - type: cron
-            name: bc-prod-scheduler
+            name: elox-prod-scheduler
             runtime: node
             region: frankfurt
             plan: 0.5c-512mb
@@ -119,11 +119,11 @@ projects:
             envVars:
               - { key: NODE_VERSION, value: "22" }
               - key: APP_URL
-                fromService: { type: web, name: bc-prod-web, envVarKey: APP_URL }
+                fromService: { type: web, name: elox-prod-web, envVarKey: APP_URL }
               - key: CRON_SECRET
-                fromService: { type: web, name: bc-prod-web, envVarKey: CRON_SECRET }
+                fromService: { type: web, name: elox-prod-web, envVarKey: CRON_SECRET }
         databases:
-          - name: bc-prod-db
+          - name: elox-prod-db
             postgresMajorVersion: "16"
             region: frankfurt
             plan: 0.5c-1g

@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
-# Production image for Binary Commerce. See docs/DEPLOYMENT.md.
-#   docker build -t binary-commerce:<git-sha> .                    # the web app
-#   docker build --target migrate -t binary-commerce-migrate:<sha> .  # runs `prisma migrate deploy`
+# Production image for Elox BioTech. See docs/DEPLOYMENT.md.
+#   docker build -t elox-biotech:<git-sha> .                    # the web app
+#   docker build --target migrate -t elox-biotech-migrate:<sha> .  # runs `prisma migrate deploy`
 # No secrets are baked in: every setting comes from the environment at run time.
 
 ARG NODE_IMAGE=node:22-bookworm-slim

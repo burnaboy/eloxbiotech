@@ -1,6 +1,6 @@
 # API reference
 
-Binary Commerce has no public JSON API for browsers or third parties. The website talks to the server through **Next.js server actions** (form posts handled on the server), and a small set of **HTTP endpoints** exists for Paystack, the scheduler, monitoring, file downloads and referral links. Both are listed here.
+Elox BioTech has no public JSON API for browsers or third parties. The website talks to the server through **Next.js server actions** (form posts handled on the server), and a small set of **HTTP endpoints** exists for Paystack, the scheduler, monitoring, file downloads and referral links. Both are listed here.
 
 All endpoints are served from `APP_URL`. Responses are JSON unless stated. Times are ISO 8601 (UTC); money is in kobo (integer, ₦1 = 100).
 

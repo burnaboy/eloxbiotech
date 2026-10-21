@@ -30,7 +30,7 @@ const REUSE_MINUTES = 20;
 const MAX_ATTEMPTS = 10;
 
 function newReference(orderNumber: string) {
-  return `BC-${orderNumber}-${randomBytes(5).toString("hex")}`;
+  return `ELX-${orderNumber}-${randomBytes(5).toString("hex")}`;
 }
 
 /** Starts (or resumes) payment for an order and returns the URL to send the buyer to. */
