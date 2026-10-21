@@ -29,8 +29,8 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   const user = await requireAdmin();
   const items = NAV.filter((n) => (n.superOnly ? user.role === "SUPER_ADMIN" : !n.perm || canAccess(user, n.perm)));
   return (
-    <div className="container grid gap-8 py-8 md:grid-cols-[210px_1fr]">
-      <aside>
+    <div className="container grid grid-cols-1 gap-8 py-8 md:grid-cols-[210px_1fr]">
+      <aside className="min-w-0">
         <p className="mb-2 hidden px-3 text-xs font-medium uppercase tracking-wider text-muted-foreground md:block">
           {user.role === "SUPER_ADMIN" ? "Super admin" : "Admin"}
         </p>

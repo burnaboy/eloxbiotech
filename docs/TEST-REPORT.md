@@ -14,12 +14,12 @@ Results of the full release check (`scripts/release-check.sh`), run on 21 Octobe
 
 | Step | What | Result |
 | --- | --- | --- |
-| 1 | Type check, then unit and integration tests (Vitest, real PostgreSQL `mlm_test`) | 108 of 108 passed, 10 files, 33.8 s |
+| 1 | Type check, then unit and integration tests (Vitest, real PostgreSQL `mlm_test`) | 108 of 108 passed, 10 files, 33.4 s |
 | 2 | Migration guard; all 16 migrations applied to two empty databases and compared; drift against `schema.prisma` | 0 blocked; 40 tables, 7 triggers, 23 checks, identical both times; no drift |
 | 3 | Production build with throwaway secret values, then every browser file searched for them | Build succeeded; 104 files scanned, no secrets or server-only fields |
-| 4 | Browser tests (Playwright) against the production build, desktop and mobile | 10 of 10 passed, 47.7 s |
+| 4 | Browser tests (Playwright) against the production build, desktop and mobile | 12 of 12 passed, 1.1 min |
 | 5 | Server log from step 4 searched for passwords, secrets, keys, database credentials and session tokens | 7 lines, none found |
-| 6 | Backup with `pg_dump`, restored to a new database, verified | 111 rows in 39 tables match; audit chain, wallet ledger and network volume checks pass |
+| 6 | Backup with `pg_dump`, restored to a new database, verified | 117 rows in 39 tables match; audit chain, wallet ledger and network volume checks pass |
 
 ## Unit and integration tests by file
 
@@ -49,6 +49,7 @@ Results of the full release check (`scripts/release-check.sh`), run on 21 Octobe
 | A second sign-in for a two-step account asks for the code | Passed | Not run |
 | Guests and members can't use admin pages, exports or any admin action (database unchanged) | Passed | Not run |
 | Members can't see others' orders; jobs, health status and webhooks need their secrets | Passed | Not run |
+| Pages fit the screen without sideways scrolling, signed out and signed in | Passed | Passed |
 
 Only the storefront tests run at mobile size by design; the rest are desktop only.
 
@@ -74,6 +75,8 @@ Found while building the acceptance and operations tests (sections 20–22), all
 3. Two admin actions (mature now, move image) didn't write audit records. Fixed (`acceptance.test.ts`, audit entries).
 4. The database didn't check a new tree position's path or stop a second root. Fixed with a trigger and unique index (`acceptance.test.ts`, database refuses).
 5. Section 24 review: the seed script created nine buyable sample products in production, and `ALLOW_TEST_PAYMENTS=true` could have switched on the simulated gateway in the live environment. Now production gets no sample products, and the simulated gateway is refused whenever `APP_ENV=production` or live payments are approved (`ops.test.ts`; the seed was checked against a scratch database with production and staging settings).
+
+6. Interface review with screenshots: the font setting pointed to an undefined variable, so every page used the browser's serif fallback; the affiliate, account and admin pages were wider than a phone screen; the dashboard said "1 members". All fixed; the new browser test failed on the old build and passes now.
 
 ## Open defects
 

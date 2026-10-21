@@ -95,8 +95,8 @@ async function AffiliateOverview({ user }: { user: Awaited<ReturnType<typeof req
         <h2 id="network-heading" className="text-sm font-medium text-muted-foreground">Your network</h2>
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <Stat label="Personally referred" value={overview.referrals.toLocaleString()} hint={`${overview.activeReferrals} active affiliate${overview.activeReferrals === 1 ? "" : "s"}`} />
-          <Stat label="Left branch" value={`${node.leftCount.toLocaleString()} members`} hint={`${volume.left.qualifyingPv.toLocaleString()} PV eligible now`} />
-          <Stat label="Right branch" value={`${node.rightCount.toLocaleString()} members`} hint={`${volume.right.qualifyingPv.toLocaleString()} PV eligible now`} />
+          <Stat label="Left branch" value={`${node.leftCount.toLocaleString()} ${node.leftCount === 1 ? "member" : "members"}`} hint={`${volume.left.qualifyingPv.toLocaleString()} PV eligible now`} />
+          <Stat label="Right branch" value={`${node.rightCount.toLocaleString()} ${node.rightCount === 1 ? "member" : "members"}`} hint={`${volume.right.qualifyingPv.toLocaleString()} PV eligible now`} />
           <Stat label="Personal volume" value={`${node.personalPv.toLocaleString()} PV`} hint="From your own and your customers' purchases" />
         </div>
       </section>

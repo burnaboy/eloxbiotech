@@ -22,7 +22,7 @@ export default {
         warning: v("warning"),
       },
       borderRadius: { lg: "0.75rem", md: "0.5rem", sm: "0.375rem" },
-      fontFamily: { sans: ["var(--font-sans)", "system-ui", "sans-serif"] },
+      fontFamily: { sans: ["ui-sans-serif", "system-ui", "-apple-system", "\"Segoe UI\"", "Roboto", "\"Helvetica Neue\"", "Arial", "sans-serif"] },
     },
   },
   plugins: [],

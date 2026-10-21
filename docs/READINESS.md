@@ -43,7 +43,7 @@ The software is complete for the scope in the specification and every automated 
 | 3 | GitHub Actions workflow and Render Blueprint not run on the real services | First run may need small fixes | Push to GitHub, apply the Blueprint to staging |
 | 4 | Payouts are manual bank batches, not Paystack Transfers | Finance uploads a file and records each transfer reference | Deliberate for a pilot; automate later if volume needs it |
 | 5 | Browser tests cover Chromium only (desktop and mobile size); no screen-reader testing | Possible issues in Safari, Firefox or with assistive technology | Manual pass before launch |
-| 6 | Restore tested on the test data set (111 rows) only | Larger restores untested | Repeat with a staging copy; quarterly drill |
+| 6 | Restore tested on the test data set (117 rows) only | Larger restores untested | Repeat with a staging copy; quarterly drill |
 | 7 | Off-site daily dumps not set up | Recovery limited to the host's window | Set up with the hosting account (`RUNBOOKS.md`) |
 | 8 | App and migration database roles not split on Render | The app role could, in theory, drop the immutability triggers | Post-launch hardening (`SECURITY.md`) |
 | 9 | Encryption key rotation not scripted | Rotation would need emergency work | Write and rehearse the script |

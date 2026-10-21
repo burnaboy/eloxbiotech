@@ -15,8 +15,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
           { href: "/dashboard/payouts", label: "Payouts" },
         ];
   return (
-    <div className="container grid gap-8 py-8 md:grid-cols-[200px_1fr]">
-      <aside><SideNav items={items} /></aside>
+    <div className="container grid grid-cols-1 gap-8 py-8 md:grid-cols-[200px_1fr]">
+      <aside className="min-w-0"><SideNav items={items} /></aside>
       <div className="min-w-0 space-y-6">{children}</div>
     </div>
   );

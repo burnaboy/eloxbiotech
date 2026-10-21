@@ -3,7 +3,7 @@
 Status of the ten development phases, as of 21 October 2026. Results are from runs actually executed on that date. The release check (`scripts/release-check.sh`) passed in full on the final commit:
 
 - 108 of 108 unit and integration tests, in 10 files, against a real PostgreSQL 16 database.
-- 10 of 10 browser tests (Chromium, desktop and mobile), against the production build.
+- 12 of 12 browser tests (Chromium, desktop and mobile), against the production build.
 - Migrations applied from scratch twice, giving identical schemas with no drift from `schema.prisma`; no unapproved destructive migrations.
 - Production build: 104 browser files scanned, no secrets found.
 - Server log from the browser run: no passwords, secrets or session tokens.

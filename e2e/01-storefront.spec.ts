@@ -40,3 +40,18 @@ test("protected pages send guests to sign in", async ({ page }) => {
     await expect(page, path).toHaveURL(/\/login\?next=/);
   }
 });
+
+test("pages fit the screen without sideways scrolling, for guests and signed-in members", async ({ page }) => {
+  const fits = async (path: string) => {
+    await page.goto(path);
+    await page.waitForLoadState("networkidle");
+    // On a phone, content that is too wide makes the browser zoom out, so compare with the device width.
+    const width = page.viewportSize()!.width;
+    const scroll = await page.evaluate(() => Math.max(document.documentElement.scrollWidth, window.innerWidth));
+    expect(scroll, `${path} is ${scroll}px wide on a ${width}px screen`).toBeLessThanOrEqual(width);
+  };
+  for (const path of ["/", "/products", "/products/sample-product-with-sizes", "/compensation", "/login", "/register"]) await fits(path);
+  const { signIn } = await import("./helpers");
+  await signIn(page, "ada@demo.local", "Password123");
+  for (const path of ["/dashboard", "/dashboard/tree", "/dashboard/commissions", "/dashboard/payouts", "/account", "/cart", "/orders"]) await fits(path);
+});

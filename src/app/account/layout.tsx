@@ -4,8 +4,8 @@ import { SideNav } from "@/components/side-nav";
 export default async function AccountLayout({ children }: { children: React.ReactNode }) {
   await requireUser("/account");
   return (
-    <div className="container grid gap-8 py-8 md:grid-cols-[200px_1fr]">
-      <aside>
+    <div className="container grid grid-cols-1 gap-8 py-8 md:grid-cols-[200px_1fr]">
+      <aside className="min-w-0">
         <SideNav
           items={[
             { href: "/account", label: "Profile" },
