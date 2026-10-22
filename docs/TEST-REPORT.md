@@ -60,7 +60,7 @@ From phase 10 (`PHASES.md`): the release check in a clean copy without a local s
 
 ## Not tested
 
-- Paystack's real servers, GitHub Actions, Render, an email provider, a real bank
+- Paystack's real servers, Render, an email provider, a real bank (the same release check now also passes on GitHub Actions on every push)
 - Browsers other than Chromium; screen readers
 - Load and performance under production traffic
 - Restore of a production-sized database

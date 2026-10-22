@@ -20,7 +20,7 @@ The software is complete for the scope in the specification and every automated 
 | Member and admin dashboards | Ready for pilot | |
 | Security controls | Ready for pilot | Open items in `SECURITY-CHECKLIST.md` (penetration test, role split, key rotation) |
 | Email | **Blocker** | No provider connected. Emails are queued in the database but never sent, so members can't verify email or reset passwords in production |
-| Deployment | Written, run locally | Render Blueprint and GitHub Actions not yet run on the real services |
+| Deployment | Code on GitHub, CI passing | Release checks and container builds pass on GitHub Actions (burnaboy/eloxbiotech). Render Blueprint not yet applied |
 | Monitoring and backups | Built | Uptime monitor, alert webhook and off-site dumps need accounts |
 | Legal and compliance | **Blocker** | Compensation plan, terms and income disclosures need Nigerian legal review (`COMPLIANCE.md`) |
 
@@ -40,7 +40,7 @@ The software is complete for the scope in the specification and every automated 
 | --- | --- | --- | --- |
 | 1 | No email provider | Launch blocker (above) | Connect one |
 | 2 | Paystack only tested with recorded responses and the built-in test gateway | Unknown differences in real responses | Staging test-mode run |
-| 3 | GitHub Actions workflow and Render Blueprint not run on the real services | First run may need small fixes | Push to GitHub, apply the Blueprint to staging |
+| 3 | Render Blueprint not applied yet | First deploy may need small fixes | Apply the Blueprint to staging |
 | 4 | Payouts are manual bank batches, not Paystack Transfers | Finance uploads a file and records each transfer reference | Deliberate for a pilot; automate later if volume needs it |
 | 5 | Browser tests cover Chromium only (desktop and mobile size); no screen-reader testing | Possible issues in Safari, Firefox or with assistive technology | Manual pass before launch |
 | 6 | Restore tested on the test data set (117 rows) only | Larger restores untested | Repeat with a staging copy; quarterly drill |
@@ -58,4 +58,4 @@ The software is complete for the scope in the specification and every automated 
 
 - Every test count and result in `TEST-REPORT.md` comes from a run on this code, with its output kept in `.release-check/`.
 - The container images, migrations and the Render deploy steps were run locally (`PHASES.md`, phase 10).
-- Nothing has been run against Paystack, Render, GitHub Actions, an email provider or a real bank.
+- The full release check and both container builds pass on GitHub Actions. Nothing has been run against Paystack, Render, an email provider or a real bank.
