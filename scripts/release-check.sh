@@ -6,6 +6,9 @@
 #   PGADMIN_URL=postgresql://mlm:mlm@localhost:5432 scripts/release-check.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# Plain output, so the checks below can read test results the same way locally and in CI.
+export NO_COLOR=1
+plain() { sed -E 's/\x1b\[[0-9;]*[A-Za-z]//g'; }
 
 PG="${PGADMIN_URL:-postgresql://mlm:mlm@localhost:5432}"
 OUT=.release-check
@@ -22,7 +25,7 @@ ENC_KEY="${APP_ENCRYPTION_KEY:-MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=}"
 
 step "1. Types and unit/integration tests"
 npx tsc --noEmit
-npx vitest run 2>&1 | tee "$OUT/vitest.txt" | tail -5
+npx vitest run 2>&1 | plain | tee "$OUT/vitest.txt" | tail -5
 grep -Eq "Tests +[0-9]+ passed" "$OUT/vitest.txt" && ! grep -Eq "[0-9]+ failed" "$OUT/vitest.txt" || fail "unit/integration tests"
 
 step "2. Migrations are safe and reproducible"
@@ -30,7 +33,7 @@ npx tsx scripts/check-migrations.ts --all || fail "a destructive migration hasn'
 fresh mlm_repro_a; fresh mlm_repro_b
 DATABASE_URL=$(db mlm_repro_a) npx prisma migrate deploy >/dev/null
 DATABASE_URL=$(db mlm_repro_b) npx prisma migrate deploy >/dev/null
-DATABASE_URL=$(db mlm_repro_a) npx prisma migrate status | tee "$OUT/migrate-status.txt" | tail -1
+DATABASE_URL=$(db mlm_repro_a) npx prisma migrate status | plain | tee "$OUT/migrate-status.txt" | tail -1
 grep -q "Database schema is up to date" "$OUT/migrate-status.txt" || fail "migrate status"
 # The schema file and the migrations describe the same database. (CHECK constraints, triggers and
 # partial indexes are written only in migrations, which Prisma doesn't model; it ignores them here.)
@@ -60,7 +63,7 @@ env "${E2E_ENV[@]}" node_modules/.bin/next start -p 3100 > "$OUT/server.log" 2>&
 SERVER=$!
 trap 'kill $SERVER 2>/dev/null || true' EXIT
 for _ in $(seq 60); do curl -sf http://localhost:3100/api/health >/dev/null && break; sleep 1; done
-env "${E2E_ENV[@]}" CI= npx playwright test 2>&1 | tee "$OUT/playwright.txt" | grep -E "✓|✘|passed|failed" || true
+env "${E2E_ENV[@]}" CI= npx playwright test 2>&1 | plain | tee "$OUT/playwright.txt" | grep -E "✓|✘|passed|failed" || true
 grep -Eq "[0-9]+ passed" "$OUT/playwright.txt" && ! grep -Eq "[0-9]+ failed" "$OUT/playwright.txt" || fail "browser tests"
 kill $SERVER; wait $SERVER 2>/dev/null || true
 

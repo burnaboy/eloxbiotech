@@ -55,6 +55,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: release-check
+          include-hidden-files: true
           path: |
             .release-check/
             !.release-check/backup.dump
