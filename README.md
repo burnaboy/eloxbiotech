@@ -14,6 +14,8 @@ An online shop for Nigeria (prices in naira, payments through Paystack) with an 
 
 ## Run it locally
 
+Step-by-step guide for Windows and Mac, including Docker, live reload and pushing changes: [docs/LOCAL-SETUP.md](docs/LOCAL-SETUP.md).
+
 Needs Node 22 and PostgreSQL 16.
 
 ```sh
@@ -69,4 +71,5 @@ Create the test databases once: `createdb mlm_test && createdb mlm_e2e` (same us
 | [TEST-REPORT.md](docs/TEST-REPORT.md) | Results of the latest full release check |
 | [READINESS.md](docs/READINESS.md) | Known limitations and production-readiness assessment |
 | [DELIVERABLES.md](docs/DELIVERABLES.md) | Where each required deliverable lives |
+| [LOCAL-SETUP.md](docs/LOCAL-SETUP.md) | Beginner guide: run the app on your laptop and push changes to GitHub |
 | [COMMANDS.md](docs/COMMANDS.md) | Exact commands: local development, migrations, tests, build, deployment |
