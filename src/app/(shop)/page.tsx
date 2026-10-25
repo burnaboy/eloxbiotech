@@ -6,6 +6,7 @@ import { formatMoney } from "@/lib/money";
 import { ProductCard, cardInclude } from "@/components/product-card";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { HeroSlideshow } from "@/components/hero-slideshow";
 
 export default async function Home() {
   const [brand, shop, categories, featured, testimonials] = await Promise.all([
@@ -18,6 +19,8 @@ export default async function Home() {
   ]);
   return (
     <>
+      <HeroSlideshow />
+
       <section className="border-b bg-gradient-to-b from-primary/10 via-primary/5 to-transparent">
         <div className="container grid gap-10 py-16 md:grid-cols-[1.2fr_1fr] md:items-center">
           <div className="space-y-6">
