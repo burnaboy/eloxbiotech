@@ -38,6 +38,9 @@ export async function SiteHeader() {
           <Button asChild variant="ghost" size="sm" className="hidden md:inline-flex">
             <Link href="/products">Shop</Link>
           </Button>
+          <Button asChild variant="ghost" size="sm" className="hidden md:inline-flex">
+            <Link href="/about">About</Link>
+          </Button>
           {user ? (
             <>
               <Button asChild variant="ghost" size="sm" className="hidden md:inline-flex">
@@ -73,6 +76,7 @@ export async function SiteHeader() {
               <MobileMenu
                 links={[
                   { href: "/products", label: "Shop" },
+                  { href: "/about", label: "About" },
                   { href: "/orders", label: "My orders" },
                   { href: "/dashboard", label: "Dashboard" },
                   ...(user.role === "ADMIN" || user.role === "SUPER_ADMIN" ? [{ href: "/admin", label: "Admin" }] : []),

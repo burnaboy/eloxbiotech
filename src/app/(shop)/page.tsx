@@ -1,4 +1,7 @@
 import Link from "next/link";
+import Image from "next/image";
+import eloxLab from "@/assets/about/elox-lab.webp";
+import { ABOUT_SUBTITLE, ABOUT_TITLE, AboutParagraphs, FreeFromList } from "@/components/about-elox";
 import { BadgeCheck, CreditCard, PackageCheck, RotateCcw, Share2, Truck, Users, Wallet } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { getBrand, getShopSettings } from "@/lib/settings";
@@ -46,6 +49,20 @@ export default async function Home() {
               </div>
             ))}
           </Card>
+        </div>
+      </section>
+
+      <section className="container py-12" aria-labelledby="about-h">
+        <div className="grid gap-10 md:grid-cols-[minmax(0,380px)_1fr] md:items-center lg:gap-14">
+          <Image src={eloxLab} alt="Elox laboratory scientist using a microscope beside sample flasks" placeholder="blur" sizes="384px" className="mx-auto h-auto w-full max-w-sm rounded-xl border" />
+          <div className="space-y-4">
+            <p className="text-sm font-medium uppercase tracking-widest text-accent">About us</p>
+            <h2 id="about-h" className="text-3xl font-semibold tracking-tight">{ABOUT_TITLE}</h2>
+            <p className="text-lg font-medium text-primary">{ABOUT_SUBTITLE}</p>
+            <div className="space-y-3 text-muted-foreground"><AboutParagraphs /></div>
+            <FreeFromList />
+            <Link href="/about" className="inline-block text-sm text-primary underline">More about Elox BioTech</Link>
+          </div>
         </div>
       </section>
 
