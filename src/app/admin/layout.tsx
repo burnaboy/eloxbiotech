@@ -11,6 +11,7 @@ const NAV: { href: string; label: string; perm?: AdminPermission; superOnly?: bo
   { href: "/admin/categories", label: "Categories", perm: "PRODUCTS" },
   { href: "/admin/discounts", label: "Discount codes", perm: "SETTINGS" },
   { href: "/admin/testimonials", label: "Testimonials", perm: "PRODUCTS" },
+  { href: "/admin/stockists", label: "Stockists", perm: "PRODUCTS" },
   { href: "/admin/users", label: "Members", perm: "MEMBERS" },
   { href: "/admin/network", label: "Network", perm: "NETWORK" },
   { href: "/admin/commissions", label: "Commissions", perm: "COMMISSIONS" },

@@ -1064,3 +1064,19 @@ model CompPlanVersion {
   orders      Order[]
   commissions Commission[]
 }
+
+/// A stockist: a shop or centre where members can buy or collect products. Managed by staff in admin.
+model Stockist {
+  id        String   @id @default(cuid())
+  name      String
+  state     String
+  city      String
+  address   String
+  phone     String?
+  hours     String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([active, state])
+}
