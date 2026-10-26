@@ -14,6 +14,8 @@ const CATEGORIES = [
   { name: "Personal Care", slug: "personal-care", sortOrder: 2 },
   { name: "Home & Kitchen", slug: "home-kitchen", sortOrder: 3 },
   { name: "Beverages", slug: "beverages", sortOrder: 4 },
+  // Membership packages shown on the dashboard's Package upgrade page (src/lib/packages.ts).
+  { name: "Packages", slug: "packages", sortOrder: 5 },
 ];
 
 const PRODUCTS = [
@@ -25,6 +27,9 @@ const PRODUCTS = [
   { sku: "SAMPLE-006", name: "Non-stick Frying Pan, 28 cm", cat: "home-kitchen", price: 22000, pv: 40, stock: 25 },
   { sku: "SAMPLE-007", name: "Moringa Green Tea, 25 bags", cat: "beverages", price: 4500, pv: 9, stock: 150 },
   { sku: "SAMPLE-008", name: "Hibiscus (Zobo) Tea Blend, 250 g", cat: "beverages", price: 5000, pv: 10, stock: 4 },
+  { sku: "SAMPLE-PKG-1", name: "Starter Package", cat: "packages", price: 25000, pv: 50, stock: 100 },
+  { sku: "SAMPLE-PKG-2", name: "Business Package", cat: "packages", price: 75000, pv: 150, stock: 100 },
+  { sku: "SAMPLE-PKG-3", name: "Executive Package", cat: "packages", price: 150000, pv: 300, stock: 100 },
 ];
 
 async function main() {
@@ -110,6 +115,14 @@ async function main() {
       await placeInTree(tx, bayo.id, ada.id, "LEFT");
       await placeInTree(tx, chi.id, ada.id, "RIGHT");
     });
+    if ((await prisma.stockist.count()) === 0) {
+      await prisma.stockist.createMany({
+        data: [
+          { name: "Demo Stockist Ikeja", state: "Lagos", city: "Ikeja", address: "12 Sample Street, Ikeja", phone: "+234 800 000 0001", hours: "Mon–Sat 9am–6pm" },
+          { name: "Demo Stockist Wuse", state: "FCT", city: "Abuja", address: "5 Sample Close, Wuse 2", phone: "+234 800 000 0002" },
+        ],
+      });
+    }
     console.log("Demo members (password Password123): ada@demo.local (affiliate), bayo@demo.local, chi@demo.local, dami@demo.local (customer)");
   }
 }
