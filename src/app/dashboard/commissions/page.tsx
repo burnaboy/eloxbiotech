@@ -70,7 +70,7 @@ export default async function CommissionsPage({ searchParams }: { searchParams: 
           </TBody>
         </Table>
       )}
-      <h2 className="text-lg font-semibold">Wallet activity</h2>
+      <h2 id="wallet-activity" className="scroll-mt-20 text-lg font-semibold">Wallet activity</h2>
       <p className="text-sm text-muted-foreground">Every change to your balances, newest first. Entries are permanent; corrections appear as new entries.</p>
       {entries.length === 0 ? <Empty>No wallet activity yet.</Empty> : (
         <Table>
