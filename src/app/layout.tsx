@@ -7,6 +7,7 @@ import { THEME_COOKIE, parseTheme } from "@/lib/theme";
 import { Suspense } from "react";
 import { SiteHeader } from "@/components/site-header";
 import { Toaster } from "@/components/toast";
+import { BrandLogo } from "@/components/brand-logo";
 
 export const dynamic = "force-dynamic";
 
@@ -40,7 +41,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <footer className="mt-16 border-t bg-muted/30 py-10 text-sm">
           <div className="container grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
             <div className="space-y-2">
-              <p className="font-semibold">{brand.companyName}</p>
+              <BrandLogo name={brand.companyName} logoUrl={brand.logoUrl} className="h-10" />
               <p className="text-muted-foreground">{brand.tagline}</p>
               {brand.registrationNumber && <p className="text-muted-foreground">Reg. no. {brand.registrationNumber}</p>}
             </div>
