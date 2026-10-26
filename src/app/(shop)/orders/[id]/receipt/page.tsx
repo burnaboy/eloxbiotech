@@ -6,6 +6,7 @@ import { OrderTotals } from "@/components/order-totals";
 import { formatMoney } from "@/lib/money";
 import { formatDate } from "@/lib/utils";
 import { PrintButton } from "@/components/print-button";
+import { BrandLogo } from "@/components/brand-logo";
 
 export const metadata = { title: "Receipt" };
 
@@ -27,7 +28,7 @@ export default async function ReceiptPage({ params }: { params: Promise<{ id: st
       <div className="space-y-6 rounded-lg border bg-card p-8 print:border-0">
         <div className="flex justify-between">
           <div>
-            <p className="text-xl font-semibold">{brand.companyName}</p>
+            <BrandLogo name={brand.companyName} logoUrl={brand.logoUrl} className="mb-2 h-10" />
             <p className="text-sm text-muted-foreground">{brand.supportEmail} {brand.supportPhone}</p>
           </div>
           <div className="text-right text-sm">
