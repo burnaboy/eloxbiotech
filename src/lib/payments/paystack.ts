@@ -1,3 +1,4 @@
+import "server-only";
 import { paystackSecretKey } from "./keys";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { GatewayError, type PaymentEvent, type PaymentProvider } from "./types";

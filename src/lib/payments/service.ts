@@ -1,3 +1,4 @@
+import "server-only";
 import { randomBytes } from "node:crypto";
 import type { Payment, Prisma } from "@prisma/client";
 import { prisma, type Tx } from "../db";
