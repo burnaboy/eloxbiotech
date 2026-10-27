@@ -1,3 +1,4 @@
+import "server-only";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import type { AdminPermission } from "@prisma/client";

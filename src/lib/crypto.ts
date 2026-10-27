@@ -1,3 +1,4 @@
+import "server-only";
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 
 /** AES-256-GCM for secrets at rest (MFA seeds). APP_ENCRYPTION_KEY is 32 random bytes, base64. */

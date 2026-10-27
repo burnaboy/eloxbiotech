@@ -1,3 +1,4 @@
+import "server-only";
 import type { PaymentProvider } from "./types";
 import { testProvider } from "./test-provider";
 import { paystackProvider } from "./paystack";
