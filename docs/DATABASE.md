@@ -9,6 +9,7 @@ The application checks these too, but the database is the last line, so a bug or
 | Invariant | How |
 | --- | --- |
 | One account per email, one referral code each | Unique `User.email`, `User.referralCode` |
+| One account per mailbox and per phone (`john+2@` and Gmail dots count as the same email; `0803…` and `+234803…` as the same phone) | Unique `User.emailCanonical`, `User.phoneNormalized`, filled by the `user_identity` trigger |
 | One position per affiliate; each position has at most one left and one right child | Unique `AffiliateNode.userId`; unique `(parentId, position)` |
 | Placement can't be changed after the fact; no node is its own ancestor | Trigger on `AffiliateNode` blocking changes to parent, position, ancestry; CHECK `AffiliateNode_no_self_ancestor` |
 | A payment reference is used once; a webhook event is processed once | Unique `Payment.providerRef`; unique `WebhookEvent(provider, eventId)` |

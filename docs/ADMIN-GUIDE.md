@@ -40,7 +40,7 @@ A super admin adds you under *Admin team* with only the areas you need (Orders, 
 
 ## Weekly and monthly
 
-- *Risk & reconciliation*: run *Check wallets* and *Check network volume*; both should report no problems. Review shared bank accounts and addresses for self-purchase rings.
+- *Risk & reconciliation*: run *Check wallets* and *Check network volume*; both should report no problems. Review shared bank accounts and addresses for self-purchase rings. *Older duplicate accounts* lists members who joined before sign-ups were limited to one per email and phone and share one with an older account; merge or suspend them if they are the same person.
 - *Reports → Payout reconciliation*: compare with the bank statement.
 - Monthly: *Audit log → Verify now*, write down the latest sealed hash in the finance pack; review who is on the admin team.
 

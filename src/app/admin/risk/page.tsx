@@ -92,7 +92,7 @@ export default async function Risk({ searchParams }: { searchParams: Promise<{ o
   const brand = await getBrand();
   const m = (v: number) => formatMoney(v, brand.currency);
   const hourAgo = new Date(Date.now() - 3600e3);
-  const [lastCheck, lastWalletCheck, issues, banks, stalePayments, disputes, sharedIps, bigPayouts, selfBuys, failedLogins] = await Promise.all([
+  const [lastCheck, lastWalletCheck, issues, banks, stalePayments, disputes, sharedIps, bigPayouts, selfBuys, failedLogins, duplicates] = await Promise.all([
     prisma.auditLog.findFirst({ where: { action: "volume.reconcile" }, orderBy: { createdAt: "desc" } }),
     prisma.auditLog.findFirst({ where: { action: "ledger.reconcile" }, orderBy: { createdAt: "desc" } }),
     paymentIssues(),
@@ -107,6 +107,17 @@ export default async function Risk({ searchParams }: { searchParams: Promise<{ o
       WHERE o.status IN ('PAID','PROCESSING','SHIPPED','DELIVERED','PARTIALLY_REFUNDED') AND r.phone IS NOT NULL AND o."shipPhone" = r.phone
       ORDER BY o."createdAt" DESC LIMIT 20`,
     prisma.loginAttempt.groupBy({ by: ["key"], where: { success: false, createdAt: { gte: new Date(Date.now() - 864e5) } }, _count: true, having: { key: { _count: { gte: 10 } } } }),
+    // Accounts made before one-account-per-person was enforced that share a mailbox or phone with an older account.
+    // New sign-ups can't do this; the database refuses them.
+    prisma.$queryRaw<{ id: string; name: string; otherId: string; otherName: string; via: string }[]>`
+      SELECT u.id, u.name, o.id AS "otherId", o.name AS "otherName", 'email' AS via
+      FROM "User" u JOIN "User" o ON o."emailCanonical" = canonical_email(u.email) AND o.id <> u.id
+      WHERE u."emailCanonical" IS NULL
+      UNION ALL
+      SELECT u.id, u.name, o.id, o.name, 'phone'
+      FROM "User" u JOIN "User" o ON o."phoneNormalized" = normalize_phone(u.phone) AND o.id <> u.id
+      WHERE u."phoneNormalized" IS NULL AND u.phone IS NOT NULL
+      LIMIT 50`,
   ]);
   return (
     <>
@@ -139,6 +150,9 @@ export default async function Risk({ searchParams }: { searchParams: Promise<{ o
         </Section>
         <Section title="Many accounts from one sign-up IP" desc="Can indicate fake accounts used to fill a tree. Shared office or mobile networks also cause this." count={sharedIps.length}>
           {sharedIps.map((s) => <p key={s.ip}><Link className="text-primary underline" href={`/admin/users?q=`}>{s.ip}</Link> · {Number(s.n)} accounts</p>)}
+        </Section>
+        <Section title="Older duplicate accounts" desc="Made before sign-ups were limited to one per email and phone. They still work; merge or suspend them if they're the same person." count={duplicates.length}>
+          {duplicates.map((d) => <p key={`${d.id}-${d.via}`}><Link className="text-primary underline" href={`/admin/users/${d.id}`}>{d.name}</Link> · same {d.via} as <Link className="text-primary underline" href={`/admin/users/${d.otherId}`}>{d.otherName}</Link></p>)}
         </Section>
         <Section title="Orders shipped to the referrer's own phone" desc="Possible self-purchasing through a customer account to earn direct commission." count={selfBuys.length}>
           {selfBuys.map((o) => <p key={o.id}><Link className="text-primary underline" href={`/admin/orders/${o.id}`}>{o.number}</Link> · referrer {o.name}</p>)}
