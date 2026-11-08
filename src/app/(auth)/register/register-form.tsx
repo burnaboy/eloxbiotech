@@ -14,7 +14,11 @@ const schema = z
   .object({
     name: z.string().trim().min(2, "Enter your full name"),
     email: z.string().email("Enter a valid email"),
-    phone: z.string().optional(),
+    phone: z
+      .string()
+      .trim()
+      .optional()
+      .refine((v) => !v || (/^\+?[\d\s().-]+$/.test(v) && v.replace(/\D/g, "").length >= 7 && v.replace(/\D/g, "").length <= 15), "Enter a full phone number, for example 0803 123 4567"),
     password: z.string().min(10, "At least 10 characters").regex(/[A-Za-z]/, "Include a letter").regex(/[0-9]/, "Include a number"),
     confirm: z.string(),
     referralCode: z.string().optional(),
@@ -52,17 +56,26 @@ export function RegisterForm({ referralCode, leg, sponsorName }: { referralCode?
         }),
       )}
     >
-      {error && <Alert tone="error">{error}</Alert>}
+      {error && (
+        <Alert tone="error">
+          {error}
+          {/already/.test(error) && (
+            <span className="mt-1 block">
+              <a href="/login" className="font-medium underline">Sign in</a> · <a href="/forgot-password" className="font-medium underline">Reset password</a>
+            </span>
+          )}
+        </Alert>
+      )}
       {sponsorName && <Alert>You were invited by <strong>{sponsorName}</strong>.</Alert>}
       <Field id="name" label="Full name" error={e.name?.message}>
         <Input id="name" autoComplete="name" aria-invalid={!!e.name} {...register("name")} />
       </Field>
       <div className="grid gap-4 sm:grid-cols-2">
-        <Field id="email" label="Email" error={e.email?.message}>
+        <Field id="email" label="Email" error={e.email?.message} hint="One account per email address">
           <Input id="email" type="email" autoComplete="email" aria-invalid={!!e.email} {...register("email")} />
         </Field>
-        <Field id="phone" label="Phone (optional)">
-          <Input id="phone" type="tel" autoComplete="tel" {...register("phone")} />
+        <Field id="phone" label="Phone (optional)" error={e.phone?.message} hint="One account per phone number">
+          <Input id="phone" type="tel" autoComplete="tel" aria-invalid={!!e.phone} {...register("phone")} />
         </Field>
       </div>
       <div className="grid gap-4 sm:grid-cols-2">
