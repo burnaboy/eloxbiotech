@@ -5,7 +5,29 @@ import { PrismaClient } from "@prisma/client";
  * Only code behind a PRODUCT_COSTS permission check does that (see canSeeCosts in session.ts).
  */
 function makeClient() {
-  return new PrismaClient({ omit: { product: { costPriceMinor: true }, productVariant: { costPriceMinor: true } } });
+  return new PrismaClient({ datasourceUrl: databaseUrl(), omit: { product: { costPriceMinor: true }, productVariant: { costPriceMinor: true } } });
+}
+
+/**
+ * Connection pool per app instance. Prisma's default is 2 × CPUs + 1, which is only 3 connections on a
+ * 1-CPU server, so a few slow requests make every other request queue. DB_POOL_SIZE (and DB_POOL_TIMEOUT,
+ * seconds) set it without editing the database URL. Keep instances × pool size under the database's
+ * connection limit (docs/SCALING.md). Values already in DATABASE_URL win.
+ */
+export function databaseUrl(env: Record<string, string | undefined> = process.env) {
+  const raw = env.DATABASE_URL;
+  if (!raw) return undefined;
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return raw;
+  }
+  const size = Number(env.DB_POOL_SIZE);
+  if (Number.isInteger(size) && size > 0 && !url.searchParams.has("connection_limit")) url.searchParams.set("connection_limit", String(size));
+  const timeout = Number(env.DB_POOL_TIMEOUT);
+  if (Number.isInteger(timeout) && timeout > 0 && !url.searchParams.has("pool_timeout")) url.searchParams.set("pool_timeout", String(timeout));
+  return url.toString();
 }
 
 type Client = ReturnType<typeof makeClient>;

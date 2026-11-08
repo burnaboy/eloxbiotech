@@ -14,10 +14,43 @@ export async function sendEmail(to: string, subject: string, body: string) {
   await deliverOne(row.id);
 }
 
-export async function deliverPendingEmails(limit = 100) {
-  const rows = await prisma.emailOutbox.findMany({ where: { sentAt: null, error: null }, orderBy: { createdAt: "asc" }, take: limit });
+/** Parallel sends per job run. Each send holds one database connection, so keep this well under the pool size. */
+const SEND_CONCURRENCY = 4;
+/** The job runs every minute; stop picking up new work before the next run starts. */
+const SEND_BUDGET_MS = 45_000;
+
+/**
+ * Sends queued emails, a few at a time, until the queue is empty, `limit` is reached or the time budget runs out.
+ * The rest wait for the next run. Overlapping runs are safe (see deliverOne).
+ */
+export async function deliverPendingEmails(limit = 2000) {
+  const started = Date.now();
   let sent = 0;
-  for (const r of rows) if (await deliverOne(r.id)) sent++;
+  let tried = 0;
+  const skipped = new Set<string>(); // failed, or being sent by an overlapping run
+  while (tried < limit && Date.now() - started < SEND_BUDGET_MS) {
+    const rows = await prisma.emailOutbox.findMany({
+      where: { sentAt: null, error: null, ...(skipped.size ? { id: { notIn: [...skipped] } } : {}) },
+      orderBy: { createdAt: "asc" },
+      take: Math.min(100, limit - tried),
+      select: { id: true },
+    });
+    if (!rows.length) break;
+    tried += rows.length;
+    let next = 0;
+    let progress = 0;
+    const worker = async () => {
+      while (next < rows.length && Date.now() - started < SEND_BUDGET_MS) {
+        const id = rows[next++].id;
+        if (await deliverOne(id)) {
+          sent++;
+          progress++;
+        } else skipped.add(id);
+      }
+    };
+    await Promise.all(Array.from({ length: SEND_CONCURRENCY }, worker));
+    if (!progress) break; // everything left is locked by another run
+  }
   return sent;
 }
 
