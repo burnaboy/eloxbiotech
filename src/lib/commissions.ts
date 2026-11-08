@@ -100,19 +100,50 @@ export async function onOrderPaid(tx: Tx, order: Pick<Order, "id" | "number" | "
   return c;
 }
 
-/** Approves commissions and credits volume for orders whose refund window has passed. Safe to run repeatedly. */
+type Candidate = { id: string; paidAt: Date | null; planVersionId: string | null };
+
+/** How many orders matureOrders reads per page. */
+const MATURE_PAGE = 500;
+
+/**
+ * Approves commissions and credits volume for orders whose refund window has passed. Safe to run repeatedly.
+ * Reads candidates page by page and only those old enough for the shortest hold period in any plan version,
+ * so orders still inside their refund window are never loaded. Plan versions are read once per run.
+ */
 export async function matureOrders(now = new Date()) {
   const ops = await getOps();
   if (ops.commissionsPaused) return 0;
-  const candidates = await prisma.order.findMany({
-    where: { status: { in: LIVE_PAID }, commissionedAt: null, disputedAt: null, paidAt: { not: null, lte: now } },
-    select: { id: true, paidAt: true, planVersionId: true },
-    orderBy: { paidAt: "asc" },
-  });
+  const current = await currentPlanVersion();
+  const versions = new Map((await prisma.compPlanVersion.findMany()).map((v) => [v.id, rulesOf(v)]));
+  const holdOf = (planVersionId: string | null) => (versions.get(planVersionId ?? current.id) ?? rulesOf(current)).holdDays;
+  const minHold = Math.min(rulesOf(current).holdDays, ...[...versions.values()].map((r) => r.holdDays));
+  const cutoff = new Date(now.getTime() - minHold * 864e5);
+
+  let matured = 0;
+  let after: { paidAt: Date; id: string } | null = null;
+  for (;;) {
+    const candidates: Candidate[] = await prisma.order.findMany({
+      where: {
+        status: { in: LIVE_PAID }, commissionedAt: null, disputedAt: null, paidAt: { not: null, lte: cutoff },
+        ...(after ? { OR: [{ paidAt: { gt: after.paidAt } }, { paidAt: after.paidAt, id: { gt: after.id } }] } : {}),
+      },
+      select: { id: true, paidAt: true, planVersionId: true },
+      orderBy: [{ paidAt: "asc" }, { id: "asc" }],
+      take: MATURE_PAGE,
+    });
+    if (!candidates.length) break;
+    const tail = candidates[candidates.length - 1];
+    after = { paidAt: tail.paidAt!, id: tail.id };
+    matured += await matureBatch(candidates, holdOf, now);
+    if (candidates.length < MATURE_PAGE) break;
+  }
+  return matured;
+}
+
+async function matureBatch(candidates: Candidate[], holdOf: (id: string | null) => number, now: Date) {
   let matured = 0;
   for (const o of candidates) {
-    const { rules } = await planForOrder(prisma, o);
-    if (o.paidAt!.getTime() + rules.holdDays * 864e5 > now.getTime()) continue;
+    if (o.paidAt!.getTime() + holdOf(o.planVersionId) * 864e5 > now.getTime()) continue;
     const done = await prisma.$transaction(async (tx) => {
       const claimed = await tx.order.updateMany({ where: { id: o.id, commissionedAt: null, disputedAt: null, status: { in: LIVE_PAID } }, data: { commissionedAt: now } });
       if (claimed.count === 0) return false;
@@ -264,60 +295,122 @@ export class BinaryDisabledError extends AppError {
   }
 }
 
-/** Runs binary pairing for every node once per period. A period can never be paid twice. */
-export async function runBinary(periodKey: string, actorId: string | null) {
+/** How many nodes one binary transaction handles. Small enough to stay well inside the transaction timeout. */
+export const BINARY_BATCH = 500;
+
+/**
+ * Qualification for a whole batch of nodes in one query (same rules as isQualified).
+ * For a sponsored member s below node n, the child of n on s's path is s.ancestorIds[n.depth + 2]
+ * (or s itself when s sits directly under n), so the leg comes from that child's position.
+ */
+export async function qualifiedSet(tx: Tx, ids: string[], plan: CompPlan) {
+  const rows = await tx.$queryRaw<{ id: string; base: boolean; hasLeft: boolean; hasRight: boolean }[]>`
+    SELECT n.id,
+      (u.status::text = 'ACTIVE' AND n."personalPv" >= ${plan.minPersonalPv}) AS base,
+      COALESCE(bool_or(c.position::text = 'LEFT'), false) AS "hasLeft",
+      COALESCE(bool_or(c.position::text = 'RIGHT'), false) AS "hasRight"
+    FROM "AffiliateNode" n
+    JOIN "User" u ON u.id = n."userId"
+    LEFT JOIN "User" su ON ${plan.requireDirectOnEachLeg} AND su."sponsorId" = n."userId" AND su.status::text = 'ACTIVE'
+    LEFT JOIN "AffiliateNode" s ON s."userId" = su.id AND s."ancestorIds"[n.depth + 1] = n.id
+    LEFT JOIN "AffiliateNode" c ON c.id = COALESCE(s."ancestorIds"[n.depth + 2], s.id)
+    WHERE n.id = ANY(${ids})
+    GROUP BY n.id, u.status, n."personalPv"`;
+  const out = new Set<string>();
+  for (const r of rows) if (r.base && (!plan.requireDirectOnEachLeg || (r.hasLeft && r.hasRight))) out.add(r.id);
+  return out;
+}
+
+/**
+ * Runs binary pairing for every node once per period. A period can never be paid twice.
+ * Nodes are handled in batches of BINARY_BATCH, each in its own transaction, so the run scales to any
+ * number of members. A node that was paired in this run is marked by its CarryMovement rows; if a run
+ * stops part-way (crash, deploy, timeout), calling it again for the same period carries on where it stopped.
+ */
+export async function runBinary(periodKey: string, actorId: string | null, opts: { batchSize?: number; maxBatches?: number } = {}) {
+  const { batchSize = BINARY_BATCH, maxBatches = Infinity } = opts;
   const ops = await getOps();
   if (ops.commissionsPaused) throw new AppError("Commission processing is paused.");
   const version = await currentPlanVersion();
   const plan = rulesOf(version);
   if (!plan.binaryEnabled) throw new BinaryDisabledError();
-  return prisma.$transaction(
-    async (tx) => {
-      const exists = await tx.binaryRun.findUnique({ where: { periodKey } });
-      if (exists) throw new AppError(`Binary for ${periodKey} has already been run.`);
-      const run = await tx.binaryRun.create({ data: { periodKey, actorId } });
+  const lockKey = `binary:${periodKey}`;
 
-      const nodes = await tx.affiliateNode.findMany({ where: { OR: [{ leftCarryPv: { gt: 0 } }, { rightCarryPv: { gt: 0 } }] } });
-      let pairsPaid = 0;
-      let amountMinor = 0;
-      let flushedMinor = 0;
-      for (const node of nodes) {
-        const qualified = await isQualified(tx, node, plan);
-        const r = computePairing({ leftPv: node.leftCarryPv, rightPv: node.rightCarryPv, qualified }, plan);
-        if (r.leftCarryPv !== node.leftCarryPv || r.rightCarryPv !== node.rightCarryPv) {
-          await tx.affiliateNode.update({ where: { id: node.id }, data: { leftCarryPv: r.leftCarryPv, rightCarryPv: r.rightCarryPv } });
-          const moves = [
-            { leg: "LEFT" as const, pv: r.leftCarryPv - node.leftCarryPv },
-            { leg: "RIGHT" as const, pv: r.rightCarryPv - node.rightCarryPv },
-          ].filter((m) => m.pv !== 0);
-          await tx.carryMovement.createMany({ data: moves.map((m) => ({ ...m, nodeId: node.id, reason: "BINARY_RUN" as const, runId: run.id })) });
-        }
-        if (r.pairs > 0) {
-          pairsPaid += r.pairs;
-          amountMinor += r.paidMinor;
-          flushedMinor += r.flushedMinor;
-          if (r.paidMinor > 0) {
-            const c = await tx.commission.create({
-              data: {
-                userId: node.userId,
-                type: "BINARY",
-                status: "APPROVED",
-                approvedAt: new Date(),
-                amountMinor: r.paidMinor,
-                runId: run.id,
-                planVersionId: version.id,
-                details: { ...r, periodKey, planVersion: version.version, before: { left: node.leftCarryPv, right: node.rightCarryPv } },
-              },
-            });
-            await post(tx, [{ userId: node.userId, type: "COMMISSION_EARNED", amountMinor: r.paidMinor, from: null, to: "AVAILABLE", sourceType: "BinaryRun", sourceId: run.id, commissionId: c.id, idempotencyKey: `commission:${c.id}:earned` }]);
-            await notify(node.userId, "Binary commission", `You matched ${r.pairs} pair(s) for ${periodKey}.`, "/dashboard/commissions", tx, "commission");
+  const run = await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
+    const exists = await tx.binaryRun.findUnique({ where: { periodKey } });
+    if (exists?.completedAt) throw new AppError(`Binary for ${periodKey} has already been run.`);
+    return exists ?? tx.binaryRun.create({ data: { periodKey, actorId, completedAt: null } });
+  });
+
+  let cursor = "";
+  for (let batch = 0; ; batch++) {
+    // maxBatches stops early and leaves the run unfinished (used by tests to check that a run resumes).
+    if (batch >= maxBatches) return prisma.binaryRun.findUniqueOrThrow({ where: { id: run.id } });
+    const last = await prisma.$transaction(
+      async (tx) => {
+        // One batch at a time per period, so two overlapping calls can't pair the same node twice.
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
+        const nodes = await tx.$queryRaw<AffiliateNode[]>`
+          SELECT n.* FROM "AffiliateNode" n
+          WHERE n.id > ${cursor} AND (n."leftCarryPv" > 0 OR n."rightCarryPv" > 0)
+            AND NOT EXISTS (SELECT 1 FROM "CarryMovement" m WHERE m."runId" = ${run.id} AND m."nodeId" = n.id)
+          ORDER BY n.id LIMIT ${batchSize}
+          FOR UPDATE OF n`;
+        if (!nodes.length) return null;
+        const qualified = await qualifiedSet(tx, nodes.map((n) => n.id), plan);
+        let pairsPaid = 0;
+        let amountMinor = 0;
+        let flushedMinor = 0;
+        for (const node of nodes) {
+          const r = computePairing({ leftPv: node.leftCarryPv, rightPv: node.rightCarryPv, qualified: qualified.has(node.id) }, plan);
+          if (r.leftCarryPv !== node.leftCarryPv || r.rightCarryPv !== node.rightCarryPv) {
+            await tx.affiliateNode.update({ where: { id: node.id }, data: { leftCarryPv: r.leftCarryPv, rightCarryPv: r.rightCarryPv } });
+            const moves = [
+              { leg: "LEFT" as const, pv: r.leftCarryPv - node.leftCarryPv },
+              { leg: "RIGHT" as const, pv: r.rightCarryPv - node.rightCarryPv },
+            ].filter((m) => m.pv !== 0);
+            await tx.carryMovement.createMany({ data: moves.map((m) => ({ ...m, nodeId: node.id, reason: "BINARY_RUN" as const, runId: run.id })) });
+          }
+          if (r.pairs > 0) {
+            pairsPaid += r.pairs;
+            amountMinor += r.paidMinor;
+            flushedMinor += r.flushedMinor;
+            if (r.paidMinor > 0) {
+              const c = await tx.commission.create({
+                data: {
+                  userId: node.userId,
+                  type: "BINARY",
+                  status: "APPROVED",
+                  approvedAt: new Date(),
+                  amountMinor: r.paidMinor,
+                  runId: run.id,
+                  planVersionId: version.id,
+                  details: { ...r, periodKey, planVersion: version.version, before: { left: node.leftCarryPv, right: node.rightCarryPv } },
+                },
+              });
+              await post(tx, [{ userId: node.userId, type: "COMMISSION_EARNED", amountMinor: r.paidMinor, from: null, to: "AVAILABLE", sourceType: "BinaryRun", sourceId: run.id, commissionId: c.id, idempotencyKey: `commission:${c.id}:earned` }]);
+              await notify(node.userId, "Binary commission", `You matched ${r.pairs} pair(s) for ${periodKey}.`, "/dashboard/commissions", tx, "commission");
+            }
           }
         }
-      }
-      const done = await tx.binaryRun.update({ where: { id: run.id }, data: { pairsPaid, amountMinor, flushedMinor } });
-      await audit("binary.run", "BinaryRun", run.id, actorId, { periodKey, pairsPaid, amountMinor, flushedMinor, planVersion: version.version }, tx);
-      return done;
-    },
-    { timeout: 120_000 },
-  );
+        if (pairsPaid || amountMinor || flushedMinor) {
+          await tx.binaryRun.update({ where: { id: run.id }, data: { pairsPaid: { increment: pairsPaid }, amountMinor: { increment: amountMinor }, flushedMinor: { increment: flushedMinor } } });
+        }
+        return nodes[nodes.length - 1].id;
+      },
+      { timeout: 120_000 },
+    );
+    if (!last) break;
+    cursor = last;
+  }
+
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
+    const current = await tx.binaryRun.findUniqueOrThrow({ where: { id: run.id } });
+    if (current.completedAt) return current; // an overlapping call finished it
+    const done = await tx.binaryRun.update({ where: { id: run.id }, data: { completedAt: new Date() } });
+    await audit("binary.run", "BinaryRun", run.id, actorId, { periodKey, pairsPaid: done.pairsPaid, amountMinor: done.amountMinor, flushedMinor: done.flushedMinor, planVersion: version.version }, tx);
+    return done;
+  });
 }

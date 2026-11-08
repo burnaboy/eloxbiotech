@@ -58,6 +58,7 @@ Create the test databases once: `createdb mlm_test && createdb mlm_e2e` (same us
 | [DATABASE.md](docs/DATABASE.md) | Rules the database enforces, indexes, tree design, background jobs |
 | [SECURITY.md](docs/SECURITY.md) | Threat model and controls; open security items |
 | [COMPLIANCE.md](docs/COMPLIANCE.md) | Legal review and questions for the Nigerian lawyer |
+| [SCALING.md](docs/SCALING.md) | Load test at 100,000 members, capacity, and when to add servers |
 | [HOSTING.md](docs/HOSTING.md) | Recommended hosting (staging and production on Render), costs, setup, go-live checklist |
 | [DEPLOYMENT.md](docs/DEPLOYMENT.md) | Environment variables, first deploy, releases, rollback |
 | [RUNBOOKS.md](docs/RUNBOOKS.md) | Payment reconciliation, withdrawals, dependency updates, migrations, backups, secrets |

@@ -15,7 +15,7 @@ export const SCHEDULE = [
   { job: "seal-audit", every: 10, offset: 5 },
   { job: "mature-orders", every: 60, offset: 2 },
   { job: "refresh-prices", every: 60, offset: 3 },
-  { job: "binary", daily: "00:15" },
+  { job: "binary", daily: "00:15", timeoutMs: 900_000 }, // large networks take minutes; a cut-off run resumes when called again
   { job: "reconcile-ledger", daily: "02:00" },
   { job: "reconcile-volume", daily: "02:10" },
   { job: "cleanup", daily: "02:20" },
@@ -39,9 +39,10 @@ async function main() {
   }
   let failed = 0;
   for (const job of dueJobs()) {
+    const timeoutMs = SCHEDULE.find((s) => s.job === job)?.timeoutMs ?? 240_000;
     const started = Date.now();
     try {
-      const res = await fetch(`${base}/api/cron/${job}`, { method: "POST", headers: { authorization: `Bearer ${secret}` }, signal: AbortSignal.timeout(240_000) });
+      const res = await fetch(`${base}/api/cron/${job}`, { method: "POST", headers: { authorization: `Bearer ${secret}` }, signal: AbortSignal.timeout(timeoutMs) });
       if (!res.ok) failed++;
       console.info(JSON.stringify({ time: new Date().toISOString(), level: res.ok ? "info" : "error", event: "scheduler.run", job, status: res.status, ms: Date.now() - started }));
     } catch (e) {

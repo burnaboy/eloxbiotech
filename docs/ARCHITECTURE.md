@@ -71,7 +71,7 @@ Races are handled in the database, not in memory, so it works with any number of
 - Payments: unique provider reference and webhook event id; the order row is locked while it changes state.
 - Wallets: an advisory lock per member around every ledger posting; withdrawals check the balance inside that lock.
 - Tree: unique `(parentId, position)`; the insert trigger checks each position's path.
-- Jobs: idempotent, with row locks (`FOR UPDATE SKIP LOCKED` for email) and unique keys (binary period).
+- Jobs: idempotent, with row locks (`FOR UPDATE SKIP LOCKED` for email) and unique keys (binary period). The binary run works in batches of 500 members, each its own transaction, and resumes if it stops part-way (`docs/SCALING.md`).
 
 ## Configuration
 
