@@ -1,3 +1,4 @@
+import "./server-only-shim";
 import { PrismaClient } from "@prisma/client";
 import { expect, type Page } from "@playwright/test";
 import { decrypt } from "../src/lib/crypto";

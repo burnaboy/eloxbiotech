@@ -1,3 +1,4 @@
+import "server-only";
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { PaymentEvent, PaymentProvider } from "./types";
 

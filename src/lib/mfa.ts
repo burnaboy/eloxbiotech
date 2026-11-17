@@ -1,3 +1,4 @@
+import "server-only";
 import { randomBytes } from "node:crypto";
 import { prisma } from "./db";
 import { AppError } from "./errors";

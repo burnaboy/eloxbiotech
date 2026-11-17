@@ -1,3 +1,4 @@
+import "server-only";
 /*
  * Structured logging. In production each line is one JSON object ({time, level, event, ...fields}) for the
  * host's log store to index and alert on; in development it's a readable line. Everything written is
