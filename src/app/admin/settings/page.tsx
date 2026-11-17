@@ -25,7 +25,7 @@ function F({ id, label, hint, children }: { id: string; label: string; hint?: st
 
 export default async function Settings({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string }> }) {
   const admin = await requireAdmin("SETTINGS");
-  const [b, s, version, history] = await Promise.all([getBrand(), getShopSettings(), currentPlanVersion(), prisma.compPlanVersion.findMany({ orderBy: { version: "desc" }, take: 10 })]);
+  const [b, s, version, history] = await Promise.all([getBrand(prisma), getShopSettings(prisma), currentPlanVersion(), prisma.compPlanVersion.findMany({ orderBy: { version: "desc" }, take: 10 })]);
   const p = rulesOf(version);
   const major = (v: number) => (v / 100).toString();
   const isSuper = admin.role === "SUPER_ADMIN";
