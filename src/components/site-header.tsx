@@ -23,16 +23,13 @@ export async function SiteHeader() {
     {ops.notice && <div role="status" className="bg-accent px-4 py-2 text-center text-sm text-accent-foreground">{ops.notice}</div>}
     <header className="sticky top-0 z-40 border-b bg-background/90 backdrop-blur">
       <div className="container flex h-16 items-center gap-4">
-        <Link href="/" className="flex items-center gap-2 font-semibold tracking-tight">
+        <Link href="/" className="flex shrink-0 items-center" aria-label={`${brand.companyName} home`}>
           <BrandLogo name={brand.companyName} logoUrl={brand.logoUrl} />
         </Link>
         <nav className="ml-auto flex items-center gap-1" aria-label="Main">
           <ThemeToggle initial={theme} />
           <Button asChild variant="ghost" size="sm" className="hidden md:inline-flex">
             <Link href="/products">Shop</Link>
-          </Button>
-          <Button asChild variant="ghost" size="sm" className="hidden md:inline-flex">
-            <Link href="/about">About</Link>
           </Button>
           {user ? (
             <>
@@ -69,7 +66,6 @@ export async function SiteHeader() {
               <MobileMenu
                 links={[
                   { href: "/products", label: "Shop" },
-                  { href: "/about", label: "About" },
                   { href: "/orders", label: "My orders" },
                   { href: "/dashboard", label: "Dashboard" },
                   ...(user.role === "ADMIN" || user.role === "SUPER_ADMIN" ? [{ href: "/admin", label: "Admin" }] : []),

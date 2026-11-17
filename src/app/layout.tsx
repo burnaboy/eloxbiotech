@@ -5,6 +5,7 @@ import { darkModeVariant, hexToRgbTriplet } from "@/lib/utils";
 import { cookies } from "next/headers";
 import { THEME_COOKIE, parseTheme } from "@/lib/theme";
 import { Suspense } from "react";
+import { BrandLogo } from "@/components/brand-logo";
 import { SiteHeader } from "@/components/site-header";
 import { Toaster } from "@/components/toast";
 import { BrandLogo } from "@/components/brand-logo";

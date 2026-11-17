@@ -1,16 +1,24 @@
-/* eslint-disable @next/next/no-img-element */
+import logoLight from "@/assets/brand/elox-logo.png";
+import logoDark from "@/assets/brand/elox-logo-dark.png";
+import { cn } from "@/lib/utils";
 
-/*
- * The Elox logo. The "ELOX" lettering is black, so a second copy with light lettering is shown in dark mode
- * (the swap is in globals.css and follows the same Light / Dark / System choice as the colours).
- * A logo URL set in Admin → Settings replaces it.
+/**
+ * The Elox logo. Two copies are rendered and CSS shows the one that suits the colour mode:
+ * black lettering on light backgrounds, white lettering on dark ones.
+ * An admin can still override it with a logo URL in Settings > Brand.
  */
-export function BrandLogo({ name, logoUrl, className = "h-9" }: { name: string; logoUrl?: string; className?: string }) {
-  if (logoUrl) return <img src={logoUrl} alt={name} className={`${className} w-auto`} />;
+export function BrandLogo({ name, logoUrl, className }: { name: string; logoUrl?: string; className?: string }) {
+  const size = cn("h-9 w-auto", className);
+  if (logoUrl) {
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={logoUrl} alt={name} className={size} />;
+  }
   return (
     <>
-      <img src="/brand/elox-logo.png" alt={name} width={199} height={87} className={`logo-light ${className} w-auto`} />
-      <img src="/brand/elox-logo-dark.png" alt={name} width={199} height={87} className={`logo-dark ${className} w-auto`} />
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={logoLight.src} width={logoLight.width} height={logoLight.height} alt={name} className={cn(size, "logo-on-light")} />
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={logoDark.src} width={logoDark.width} height={logoDark.height} alt={name} className={cn(size, "logo-on-dark")} />
     </>
   );
 }

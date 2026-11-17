@@ -60,19 +60,6 @@
 }
 
 @layer components {
-  /* Logo: dark-lettering copy in light mode, light-lettering copy in dark mode. */
-  .logo-dark { display: none; }
-  :root[data-theme="dark"] .logo-light { display: none; }
-  :root[data-theme="dark"] .logo-dark { display: block; }
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) .logo-light { display: none; }
-    :root:not([data-theme="light"]) .logo-dark { display: block; }
-  }
-  /* Paper is white, so print the dark-lettering copy. */
-  @media print {
-    .logo-light { display: block !important; }
-    .logo-dark { display: none !important; }
-  }
   .prose-page { @apply max-w-3xl space-y-4 leading-relaxed; }
   .prose-page h1 { @apply text-3xl font-semibold tracking-tight; }
   .prose-page h2 { @apply pt-4 text-xl font-semibold tracking-tight; }
@@ -83,4 +70,15 @@
   .prose-page a { @apply text-primary underline; }
   .prose-page table { @apply w-full text-sm; }
   .prose-page td, .prose-page th { @apply border-b py-2 pr-4 text-left align-top; }
+}
+
+/* Brand logo: black lettering in light mode, white lettering in dark mode. Print always uses the light one. */
+.logo-on-dark { display: none; }
+@media screen and (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .logo-on-light { display: none; }
+  :root:not([data-theme="light"]) .logo-on-dark { display: inline-block; }
+}
+@media screen {
+  :root[data-theme="dark"] .logo-on-light { display: none; }
+  :root[data-theme="dark"] .logo-on-dark { display: inline-block; }
 }
