@@ -36,6 +36,9 @@ A super admin adds you under *Admin team* with only the areas you need (Orders, 
 | Suspend a member | Member page | Signs them out everywhere |
 | Change the compensation plan | *Settings* (super admin) | Publishes a new version; past sales keep the version they were paid under. Get the change approved in writing first |
 | Discount codes | *Discount codes* | Limits per code and per customer |
+| Stockists | *Stockists* | Members see active stockists on *Stockist location* in their dashboard, filtered by state |
+| Membership packages | *Products & stock* | Put package products in the *Packages* category; members buy and upgrade from *Package upgrade* through the normal checkout |
+| Rank awards | `src/lib/ranks.ts` | Ranks are worked out from active referrals and weaker-team PV; thresholds and award names are set there. Awards are handed out by staff and never move money |
 | Reports and exports | *Reports*, export buttons | Exports need a fresh code and are logged. Store downloaded files securely and delete them when done |
 
 ## Weekly and monthly

@@ -692,3 +692,33 @@ export async function toggleDiscountAction(id: string, active: boolean) {
     return active ? "Code switched on" : "Code switched off";
   });
 }
+
+// ---------- Stockists ----------
+
+export async function saveStockistAction(id: string | null, fd: FormData) {
+  await act(`/admin/stockists`, { perm: "PRODUCTS" }, async (adminId) => {
+    const v = z
+      .object({
+        name: z.string().trim().min(2).max(100),
+        state: z.string().trim().min(2).max(60),
+        city: z.string().trim().min(2).max(60),
+        address: z.string().trim().min(5).max(300),
+        phone: z.string().trim().max(30).regex(/^[0-9+()\s-]*$/, "Phone number can only contain digits, spaces and + ( ) -"),
+        hours: z.string().trim().max(100),
+        active: z.boolean(),
+      })
+      .parse({ name: str(fd, "name"), state: str(fd, "state"), city: str(fd, "city"), address: str(fd, "address"), phone: str(fd, "phone"), hours: str(fd, "hours"), active: fd.get("active") === "on" });
+    const data = { ...v, phone: v.phone || null, hours: v.hours || null };
+    const s = id ? await prisma.stockist.update({ where: { id }, data }) : await prisma.stockist.create({ data });
+    await audit("stockist.save", "Stockist", s.id, adminId, data);
+    return "Stockist saved";
+  });
+}
+
+export async function deleteStockistAction(id: string) {
+  await act(`/admin/stockists`, { perm: "PRODUCTS" }, async (adminId) => {
+    await prisma.stockist.delete({ where: { id } });
+    await audit("stockist.delete", "Stockist", id, adminId);
+    return "Deleted";
+  });
+}
