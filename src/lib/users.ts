@@ -7,10 +7,50 @@ import { AppError } from "./errors";
 import { placeInTree } from "./tree";
 import { audit } from "./audit";
 
+/** Optional phone: if given it must hold 7 to 15 digits, so "+234 803 123 4567" and "08031234567" both pass. */
+export const phoneField = z
+  .string()
+  .trim()
+  .max(30)
+  .refine((v) => v === "" || /^\+?[\d\s().-]+$/.test(v), "Enter a phone number using digits only")
+  .refine((v) => { const d = v.replace(/\D/g, "").length; return v === "" || (d >= 7 && d <= 15); }, "Enter a full phone number, for example 0803 123 4567")
+  .optional()
+  .or(z.literal(""));
+
+export const DUPLICATE_EMAIL = "An account with this email address already exists. Sign in instead, or use “Forgot password” if you can't get in.";
+export const DUPLICATE_PHONE = "This phone number is already linked to another account. Sign in to that account instead, or contact support if the number is yours.";
+
+/**
+ * Says whether the email or phone already belongs to an account, using the same rules as the database
+ * (so "j.ohn+2@gmail.com" matches "john@gmail.com", and "0803…" matches "+234803…").
+ * This gives a clear message early; the unique indexes still catch two sign-ups at the same moment.
+ */
+export async function findDuplicate(email: string, phone: string | null | undefined, exceptUserId?: string) {
+  const rows = await prisma.$queryRaw<{ email: boolean; phone: boolean }[]>`
+    SELECT "emailCanonical" = canonical_email(${email}) AS email,
+           COALESCE("phoneNormalized" = normalize_phone(${phone || null}::text), false) AS phone
+    FROM "User"
+    WHERE ("emailCanonical" = canonical_email(${email}) OR "phoneNormalized" = normalize_phone(${phone || null}::text))
+      AND id <> ${exceptUserId ?? ""}
+    LIMIT 2`;
+  if (rows.some((r) => r.email)) return DUPLICATE_EMAIL;
+  if (rows.some((r) => r.phone)) return DUPLICATE_PHONE;
+  return null;
+}
+
+/** Turns a unique-index clash on email or phone into a message for the form, or null for anything else. */
+export function duplicateMessage(e: unknown) {
+  if (!(e instanceof Prisma.PrismaClientKnownRequestError) || e.code !== "P2002") return null;
+  const target = String(e.meta?.target ?? "");
+  if (target.includes("phone")) return DUPLICATE_PHONE;
+  if (target.includes("email")) return DUPLICATE_EMAIL;
+  return null;
+}
+
 export const registerSchema = z.object({
   name: z.string().trim().min(2).max(80),
   email: z.string().trim().toLowerCase().email().max(160),
-  phone: z.string().trim().max(30).optional().or(z.literal("")),
+  phone: phoneField,
   password: z
     .string()
     .min(10, "Password must be at least 10 characters")
@@ -36,6 +76,8 @@ export async function registerUser(raw: RegisterInput, meta: { ip?: string } = {
     const recent = await prisma.user.count({ where: { signupIp: meta.ip, createdAt: { gte: new Date(Date.now() - 3600e3) } } });
     if (recent >= 5) throw new AppError("Too many sign-ups from this network. Please try again later.", 429);
   }
+  const duplicate = await findDuplicate(input.email, input.phone);
+  if (duplicate) throw new AppError(duplicate, 409);
   const sponsor = await findSponsor(input.referralCode || undefined);
   const passwordHash = await hashPassword(input.password);
 
@@ -59,11 +101,9 @@ export async function registerUser(raw: RegisterInput, meta: { ip?: string } = {
         return user;
       });
     } catch (e) {
-      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
-        const target = String(e.meta?.target ?? "");
-        if (target.includes("email")) throw new AppError("An account with this email already exists.");
-        if (target.includes("referralCode")) continue;
-      }
+      const duplicate = duplicateMessage(e);
+      if (duplicate) throw new AppError(duplicate, 409);
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002" && String(e.meta?.target ?? "").includes("referralCode")) continue;
       throw e;
     }
   }

@@ -186,7 +186,11 @@ model User {
   emailMarketing         Boolean           @default(false)
   name                   String
   phone                  String?
-  role                   Role              @default(CUSTOMER)
+  /// Email with "+tag" and Gmail dots removed. Set by a database trigger; unique, so one account per mailbox.
+  emailCanonical         String?           @unique
+  /// Phone in international form (+234…). Set by a database trigger; unique, so one account per phone.
+  phoneNormalized        String?           @unique
+  role                  Role              @default(CUSTOMER)
   status                 UserStatus        @default(ACTIVE)
   referralCode           String            @unique
   /// Affiliate waiting for an administrator to choose their position (approval placement mode).

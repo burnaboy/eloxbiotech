@@ -10,7 +10,7 @@ import { prisma } from "@/lib/db";
 import { runAction, str, type ActionState } from "@/lib/action";
 import { AppError } from "@/lib/errors";
 import { SESSION_COOKIE, hashPassword, sha256, verifyPassword } from "@/lib/auth";
-import { registerSchema } from "@/lib/users";
+import { duplicateMessage, findDuplicate, phoneField, registerSchema } from "@/lib/users";
 import { saveAddress, deleteAddress, addressInput } from "@/lib/addresses";
 import { beginEnrolment, checkSecondFactor, confirmEnrolment, mfaRequired } from "@/lib/mfa";
 import { audit } from "@/lib/audit";
@@ -19,11 +19,20 @@ import { sendVerificationEmail } from "@/lib/email-verification";
 export async function updateProfileAction(fd: FormData) {
   const user = await requireUser("/account");
   const res = await runAction(async () => {
-    const v = z.object({ name: z.string().trim().min(2).max(80), phone: z.string().trim().max(30) }).parse({ name: str(fd, "name"), phone: str(fd, "phone") });
-    await prisma.user.update({ where: { id: user.id }, data: { name: v.name, phone: v.phone || null } });
+    const v = z.object({ name: z.string().trim().min(2).max(80), phone: phoneField }).parse({ name: str(fd, "name"), phone: str(fd, "phone") });
+    const phone = v.phone || null;
+    if (phone && phone !== user.phone) {
+      const duplicate = await findDuplicate("", phone, user.id);
+      if (duplicate) throw new AppError(duplicate);
+    }
+    await prisma.user.update({ where: { id: user.id }, data: { name: v.name, phone } }).catch((e) => {
+      const duplicate = duplicateMessage(e);
+      throw duplicate ? new AppError(duplicate) : e;
+    });
     return { ok: "Profile saved" };
   });
-  redirect(`/account?${res?.error ? `error=${encodeURIComponent(res.error)}` : "ok=Profile%20saved"}`);
+  const error = res?.fieldErrors?.phone?.[0] ?? res?.error;
+  redirect(`/account?${error ? `error=${encodeURIComponent(error)}` : "ok=Profile%20saved"}`);
 }
 
 export async function changePasswordAction(fd: FormData) {
