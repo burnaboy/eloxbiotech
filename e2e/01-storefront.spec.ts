@@ -35,6 +35,19 @@ test("guest can browse the shop and read the policies", async ({ page }) => {
   }
 });
 
+test("the home page slideshow shows the products and can be paused and stepped through", async ({ page }) => {
+  await page.goto("/");
+  const show = page.getByRole("region", { name: "Elox products" });
+  await expect(show.getByText("Alkaline water, bottled for every day")).toBeVisible();
+  await show.getByRole("button", { name: "Pause slideshow" }).click();
+  await expect(show.getByRole("button", { name: "Play slideshow" })).toBeVisible();
+  await show.getByRole("button", { name: "Next slide" }).click();
+  await expect(show.getByText("Hydration that keeps up with you")).toBeVisible();
+  await show.getByRole("button", { name: /^Show slide 3:/ }).click();
+  await expect(show.getByText("HB Solution water disinfectant")).toBeVisible();
+  await expect(show.getByText("Alkaline water, bottled for every day")).toBeHidden();
+});
+
 test("protected pages send guests to sign in", async ({ page }) => {
   for (const path of ["/cart", "/checkout", "/dashboard", "/admin", "/account"]) {
     await page.goto(path);
