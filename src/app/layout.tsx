@@ -8,7 +8,6 @@ import { Suspense } from "react";
 import { BrandLogo } from "@/components/brand-logo";
 import { SiteHeader } from "@/components/site-header";
 import { Toaster } from "@/components/toast";
-import { BrandLogo } from "@/components/brand-logo";
 
 export const dynamic = "force-dynamic";
 
