@@ -143,7 +143,31 @@ export const DEFAULT_BRAND: Brand = {
   about: "",
 };
 
-export async function getBrand(tx: Tx = prisma): Promise<Brand> {
+/*
+ * Brand and shop settings are read on nearly every page. Reads without a transaction are kept in memory for a
+ * few seconds per server instance, which removes most of those queries under load. Anything that needs the
+ * exact stored value (inside a transaction, or before an admin edit) passes a client and always reads fresh.
+ * Ops switches and the comp plan are never cached.
+ */
+const CACHE_MS = 10_000;
+const cache = new Map<string, { at: number; value: Promise<unknown> }>();
+
+/** Drops this instance's cached settings (tests, and after a restore). */
+export function clearSettingsCache() {
+  cache.clear();
+}
+
+function cached<T>(key: string, load: () => Promise<T>): Promise<T> {
+  const hit = cache.get(key);
+  if (hit && Date.now() - hit.at < CACHE_MS) return hit.value as Promise<T>;
+  const value = load();
+  cache.set(key, { at: Date.now(), value });
+  value.catch(() => cache.delete(key));
+  return value;
+}
+
+export async function getBrand(tx?: Tx): Promise<Brand> {
+  if (!tx) return cached("brand", () => getBrand(prisma));
   const row = await tx.setting.findUnique({ where: { key: "brand" } });
   return brandSchema.parse({ ...DEFAULT_BRAND, ...((row?.value as object) ?? {}) });
 }
@@ -161,11 +185,13 @@ export async function getCompPlan(tx: Tx = prisma): Promise<CompPlan> {
   return parseCompPlan(row?.value);
 }
 
-export async function getShopSettings(tx: Tx = prisma): Promise<ShopSettings> {
+export async function getShopSettings(tx?: Tx): Promise<ShopSettings> {
+  if (!tx) return cached("shop", () => getShopSettings(prisma));
   const row = await tx.setting.findUnique({ where: { key: "shop" } });
   return shopSettingsSchema.parse({ ...DEFAULT_SHOP, ...((row?.value as object) ?? {}) });
 }
 
 export async function saveSetting(key: "compPlan" | "shop" | "brand" | "ops", value: CompPlan | ShopSettings | Brand | Ops, tx: Tx = prisma) {
   await tx.setting.upsert({ where: { key }, create: { key, value }, update: { value } });
+  cache.delete(key);
 }

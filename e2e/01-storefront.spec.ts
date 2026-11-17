@@ -35,6 +35,19 @@ test("guest can browse the shop and read the policies", async ({ page }) => {
   }
 });
 
+test("the home page slideshow shows the products and can be paused and stepped through", async ({ page }) => {
+  await page.goto("/");
+  const show = page.getByRole("region", { name: "Elox products" });
+  await expect(show.getByText("Alkaline water, bottled for every day")).toBeVisible();
+  await show.getByRole("button", { name: "Pause slideshow" }).click();
+  await expect(show.getByRole("button", { name: "Play slideshow" })).toBeVisible();
+  await show.getByRole("button", { name: "Next slide" }).click();
+  await expect(show.getByText("Hydration that keeps up with you")).toBeVisible();
+  await show.getByRole("button", { name: /^Show slide 3:/ }).click();
+  await expect(show.getByText("HB Solution water disinfectant")).toBeVisible();
+  await expect(show.getByText("Alkaline water, bottled for every day")).toBeHidden();
+});
+
 test("protected pages send guests to sign in", async ({ page }) => {
   for (const path of ["/cart", "/checkout", "/dashboard", "/admin", "/account"]) {
     await page.goto(path);
@@ -81,4 +94,18 @@ test("the colour mode switch steps through system, light and dark, and is rememb
   await page.getByRole("button", { name: /Colour mode: Dark/ }).click();
   await expect(html).not.toHaveAttribute("data-theme");
   expect(await bg()).toBe("rgb(250, 250, 247)");
+});
+
+test("the About page and the home page tell the Elox BioTech story", async ({ page, isMobile }) => {
+  await page.goto("/");
+  const about = page.getByRole("region", { name: "Welcome To Elox BioTech Limited" });
+  await expect(about.getByText("A Water Based Disinfection Technology Solutions")).toBeVisible();
+  await expect(about.getByText("Aldehyde free")).toBeVisible();
+  await about.getByRole("link", { name: "More about Elox BioTech" }).click();
+  await expect(page).toHaveURL(/\/about$/);
+  await expect(page.getByRole("heading", { level: 1, name: "Welcome To Elox BioTech Limited" })).toBeVisible();
+  await expect(page.getByText(/Elox GmbH in Velden, Austria/)).toBeVisible();
+  await expect(page.getByRole("img", { name: /Elox laboratory scientist/ })).toBeVisible();
+  // The header has no room for it on a phone; there it is in the footer and the home page section.
+  if (!isMobile) await expect(page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "About", exact: true })).toBeVisible();
 });

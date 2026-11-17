@@ -1,3 +1,4 @@
+import "server-only";
 import { paystackSecretKey, testPaymentsAllowed } from "../payments/keys";
 import { GatewayError } from "../payments/types";
 

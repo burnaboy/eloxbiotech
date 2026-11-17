@@ -449,7 +449,7 @@ export async function contactHandledAction(id: string) {
 
 export async function saveBrandAction(fd: FormData) {
   await act(`/admin/settings`, { perm: "SETTINGS" }, async (adminId) => {
-    const before = await getBrand();
+    const before = await getBrand(prisma);
     const v = brandSchema.parse({
       companyName: str(fd, "companyName"), tagline: str(fd, "tagline"), logoUrl: str(fd, "logoUrl"), primaryColor: str(fd, "primaryColor"),
       accentColor: str(fd, "accentColor"), currency: str(fd, "currency"), supportEmail: str(fd, "supportEmail"), supportPhone: str(fd, "supportPhone"),
@@ -468,7 +468,7 @@ export async function saveBrandAction(fd: FormData) {
 /** Delivery and order settings. Tax and payout thresholds are kept as they are (see saveFinanceAction). */
 export async function saveShopAction(fd: FormData) {
   await act(`/admin/settings`, { perm: "SETTINGS" }, async (adminId) => {
-    const before = await getShopSettings();
+    const before = await getShopSettings(prisma);
     const v = shopSettingsSchema.parse({
       ...before,
       flatShippingMinor: toMinor(str(fd, "flatShipping")), freeShippingOverMinor: toMinor(str(fd, "freeShippingOver")),
@@ -484,7 +484,7 @@ export async function saveShopAction(fd: FormData) {
 /** Sensitive financial settings (VAT and the minimum withdrawal): super admin only, fresh authenticator code, and a reason. */
 export async function saveFinanceAction(fd: FormData) {
   await act(`/admin/settings`, { superOnly: true, stepUp: true, risk: { fd, action: "settings.finance", target: "shop" } }, async (adminId, reason) => {
-    const before = await getShopSettings();
+    const before = await getShopSettings(prisma);
     const v = shopSettingsSchema.parse({
       ...before,
       minPayoutMinor: toMinor(str(fd, "minPayout")),
@@ -690,5 +690,35 @@ export async function toggleDiscountAction(id: string, active: boolean) {
     await prisma.discountCode.update({ where: { id }, data: { active } });
     await audit(active ? "discount.enable" : "discount.disable", "DiscountCode", id, adminId);
     return active ? "Code switched on" : "Code switched off";
+  });
+}
+
+// ---------- Stockists ----------
+
+export async function saveStockistAction(id: string | null, fd: FormData) {
+  await act(`/admin/stockists`, { perm: "PRODUCTS" }, async (adminId) => {
+    const v = z
+      .object({
+        name: z.string().trim().min(2).max(100),
+        state: z.string().trim().min(2).max(60),
+        city: z.string().trim().min(2).max(60),
+        address: z.string().trim().min(5).max(300),
+        phone: z.string().trim().max(30).regex(/^[0-9+()\s-]*$/, "Phone number can only contain digits, spaces and + ( ) -"),
+        hours: z.string().trim().max(100),
+        active: z.boolean(),
+      })
+      .parse({ name: str(fd, "name"), state: str(fd, "state"), city: str(fd, "city"), address: str(fd, "address"), phone: str(fd, "phone"), hours: str(fd, "hours"), active: fd.get("active") === "on" });
+    const data = { ...v, phone: v.phone || null, hours: v.hours || null };
+    const s = id ? await prisma.stockist.update({ where: { id }, data }) : await prisma.stockist.create({ data });
+    await audit("stockist.save", "Stockist", s.id, adminId, data);
+    return "Stockist saved";
+  });
+}
+
+export async function deleteStockistAction(id: string) {
+  await act(`/admin/stockists`, { perm: "PRODUCTS" }, async (adminId) => {
+    await prisma.stockist.delete({ where: { id } });
+    await audit("stockist.delete", "Stockist", id, adminId);
+    return "Deleted";
   });
 }

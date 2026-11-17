@@ -1,4 +1,7 @@
 import Link from "next/link";
+import Image from "next/image";
+import eloxLab from "@/assets/about/elox-lab.webp";
+import { ABOUT_SUBTITLE, ABOUT_TITLE, AboutParagraphs, FreeFromList } from "@/components/about-elox";
 import { BadgeCheck, CreditCard, PackageCheck, RotateCcw, Share2, Truck, Users, Wallet } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { getBrand, getShopSettings } from "@/lib/settings";
@@ -6,6 +9,7 @@ import { formatMoney } from "@/lib/money";
 import { ProductCard, cardInclude } from "@/components/product-card";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { HeroSlideshow } from "@/components/hero-slideshow";
 
 export default async function Home() {
   const [brand, shop, categories, featured, testimonials] = await Promise.all([
@@ -18,6 +22,8 @@ export default async function Home() {
   ]);
   return (
     <>
+      <HeroSlideshow />
+
       <section className="border-b bg-gradient-to-b from-primary/10 via-primary/5 to-transparent">
         <div className="container grid gap-10 py-16 md:grid-cols-[1.2fr_1fr] md:items-center">
           <div className="space-y-6">
@@ -46,6 +52,20 @@ export default async function Home() {
               </div>
             ))}
           </Card>
+        </div>
+      </section>
+
+      <section className="container py-12" aria-labelledby="about-h">
+        <div className="grid gap-10 md:grid-cols-[minmax(0,380px)_1fr] md:items-center lg:gap-14">
+          <Image src={eloxLab} alt="Elox laboratory scientist using a microscope beside sample flasks" placeholder="blur" sizes="384px" className="mx-auto h-auto w-full max-w-sm rounded-xl border" />
+          <div className="space-y-4">
+            <p className="text-sm font-medium uppercase tracking-widest text-accent">About us</p>
+            <h2 id="about-h" className="text-3xl font-semibold tracking-tight">{ABOUT_TITLE}</h2>
+            <p className="text-lg font-medium text-primary">{ABOUT_SUBTITLE}</p>
+            <div className="space-y-3 text-muted-foreground"><AboutParagraphs /></div>
+            <FreeFromList />
+            <Link href="/about" className="inline-block text-sm text-primary underline">More about Elox BioTech</Link>
+          </div>
         </div>
       </section>
 

@@ -1,3 +1,4 @@
+import "server-only";
 /**
  * The Paystack secret key, with the go-live rules enforced in code:
  * - outside production, and in staging (APP_ENV=staging), only test keys (sk_test_) are accepted;

@@ -19,6 +19,8 @@ import { setDefaultLegAction } from "./actions";
 import { volumeSummary } from "@/lib/volume";
 import { VolumeTable } from "@/components/volume-table";
 import { PendingPlacement } from "@/components/pending-placement";
+import { subWallets } from "@/lib/wallets";
+import { LEDGER_LABEL, availableEffect } from "@/lib/ledger";
 
 const placementLabel = { AUTO: "automatic", SPONSOR_CHOICE: "side chosen by sponsor", ADMIN: "assigned by an administrator" } as const;
 
@@ -66,12 +68,18 @@ async function AffiliateOverview({ user }: { user: Awaited<ReturnType<typeof req
     );
   }
   const qualified = await isQualified(prisma, node, plan);
-  const [sponsor, parent, volume, placement] = await Promise.all([
+  const [sponsor, parent, volume, placement, wallets, activity] = await Promise.all([
     user.sponsorId ? prisma.user.findUnique({ where: { id: user.sponsorId }, select: { name: true, referralCode: true } }) : null,
     node.parentId ? prisma.affiliateNode.findUnique({ where: { id: node.parentId }, include: { user: { select: { name: true } } } }) : null,
     volumeSummary(node),
     prisma.placementRecord.findUnique({ where: { nodeId: node.id } }),
+    subWallets(user.id),
+    prisma.ledgerEntry.findMany({ where: { userId: user.id }, orderBy: { createdAt: "desc" }, take: 6 }),
   ]);
+  const downlines = node.leftCount + node.rightCount;
+  const members = (n: number) => `${n.toLocaleString()} ${n === 1 ? "member" : "members"}`;
+  const waiting = (w: { pendingMinor: number; heldMinor: number }) =>
+    [w.pendingMinor ? `${m(w.pendingMinor)} pending` : "", w.heldMinor ? `${m(w.heldMinor)} held` : ""].filter(Boolean).join(", ");
   const m = (v: number) => formatMoney(v, brand.currency);
   const base = process.env.APP_URL ?? "";
   return (
@@ -91,12 +99,49 @@ async function AffiliateOverview({ user }: { user: Awaited<ReturnType<typeof req
           <Stat label="Paid withdrawals" value={m(wallet.paidOutMinor)} hint="Confirmed as sent to your bank" />
         </div>
       </section>
+      <section aria-labelledby="wallets-heading" className="space-y-3">
+        <h2 id="wallets-heading" className="text-sm font-medium text-muted-foreground">Wallets</h2>
+        <div className="grid gap-4 sm:grid-cols-3">
+          <Stat label="Wallet balance" value={m(wallet.availableMinor)} hint={<>Available to withdraw. <Link href="/dashboard/payouts" className="text-primary underline">Withdraw</Link></>} />
+          <Stat label="Unilevel wallet" value={m(wallets.unilevel.earnedMinor)} hint={`Direct commissions from your referral sales${waiting(wallets.unilevel) ? `, plus ${waiting(wallets.unilevel)}` : ""}`} />
+          <Stat label="Bonus wallet" value={m(wallets.bonus.earnedMinor)} hint={`Binary pairing bonuses${waiting(wallets.bonus) ? `, plus ${waiting(wallets.bonus)}` : ""}`} />
+        </div>
+        <p className="text-xs text-muted-foreground">The Unilevel and Bonus wallets show what each kind of commission has earned you after reversals. Both add up into your wallet balance, which is what you withdraw from.</p>
+      </section>
+      <Card>
+        <CardHeader className="flex-row items-center justify-between">
+          <div className="space-y-1.5">
+            <CardTitle>Wallet activity</CardTitle>
+            <CardDescription>Wallet balance <strong className="tabular-nums text-foreground">{m(wallet.availableMinor)}</strong>. Latest changes, newest first.</CardDescription>
+          </div>
+          <Button asChild variant="link" size="sm"><Link href="/dashboard/commissions#wallet-activity">View all</Link></Button>
+        </CardHeader>
+        <CardContent>
+          {activity.length === 0 ? <Empty>No wallet activity yet.</Empty> : (
+            <ul className="divide-y text-sm">
+              {activity.map((e) => {
+                const eff = availableEffect(e);
+                return (
+                  <li key={e.id} className="flex items-center justify-between gap-3 py-2">
+                    <span className="min-w-0">
+                      <span className="font-medium">{LEDGER_LABEL[e.type]}</span> <span className="text-muted-foreground">{m(e.amountMinor)} · {formatDate(e.createdAt)}</span>
+                      {e.memo && <span className="block truncate text-xs text-muted-foreground">{e.memo}</span>}
+                    </span>
+                    <span className={`shrink-0 tabular-nums ${eff < 0 ? "text-destructive" : eff > 0 ? "text-success" : "text-muted-foreground"}`}>{eff === 0 ? (e.toBucket ? `to ${e.toBucket.toLowerCase().replace("_", " ")}` : "—") : `${eff > 0 ? "+" : "−"}${m(Math.abs(eff))}`}</span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
       <section aria-labelledby="network-heading" className="space-y-3">
         <h2 id="network-heading" className="text-sm font-medium text-muted-foreground">Your network</h2>
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+          <Stat label="Total downlines" value={members(downlines)} hint={`In your binary tree: ${node.leftCount.toLocaleString()} left, ${node.rightCount.toLocaleString()} right`} />
           <Stat label="Personally referred" value={overview.referrals.toLocaleString()} hint={`${overview.activeReferrals} active affiliate${overview.activeReferrals === 1 ? "" : "s"}`} />
-          <Stat label="Left branch" value={`${node.leftCount.toLocaleString()} ${node.leftCount === 1 ? "member" : "members"}`} hint={`${volume.left.qualifyingPv.toLocaleString()} PV eligible now`} />
-          <Stat label="Right branch" value={`${node.rightCount.toLocaleString()} ${node.rightCount === 1 ? "member" : "members"}`} hint={`${volume.right.qualifyingPv.toLocaleString()} PV eligible now`} />
+          <Stat label="Left branch" value={members(node.leftCount)} hint={`${volume.left.qualifyingPv.toLocaleString()} PV eligible now`} />
+          <Stat label="Right branch" value={members(node.rightCount)} hint={`${volume.right.qualifyingPv.toLocaleString()} PV eligible now`} />
           <Stat label="Personal volume" value={`${node.personalPv.toLocaleString()} PV`} hint="From your own and your customers' purchases" />
         </div>
       </section>

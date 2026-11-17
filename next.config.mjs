@@ -9,6 +9,8 @@ const securityHeaders = [
 const nextConfig = {
   output: "standalone",
   poweredByHeader: false,
+  // Never publish browser source maps: they would hand out the original source. (This is the default; kept explicit.)
+  productionBrowserSourceMaps: false,
   // Product image uploads go through server actions; images are limited to 5 MB in lib/images.ts.
   experimental: { serverActions: { bodySizeLimit: "6mb" } },
   async headers() {

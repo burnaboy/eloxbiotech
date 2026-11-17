@@ -12,7 +12,14 @@ const env = {
 };
 
 export default defineConfig({
-  resolve: { alias: { "@": path.resolve(__dirname, "src") } },
+  resolve: {
+    alias: {
+      "@": path.resolve(__dirname, "src"),
+      // Server-only modules are marked with `import "server-only"` so Next refuses to bundle them for the
+      // browser. Tests run in plain Node, so the marker resolves to an empty module here.
+      "server-only": path.resolve(__dirname, "node_modules/server-only/empty.js"),
+    },
+  },
   test: {
     environment: "node",
     env,

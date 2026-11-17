@@ -21,6 +21,12 @@ fresh() { psql "$PG/postgres" -qc "DROP DATABASE IF EXISTS $1 WITH (FORCE)" -c "
 # Throwaway values: if any of them shows up in a browser file or a log, the check fails.
 CANARY_PAYSTACK="sk_test_CANARY$(openssl rand -hex 12)"
 CANARY_S3="CANARYS3$(openssl rand -hex 12)"
+CANARY_S3_ID="CANARYID$(openssl rand -hex 8)"
+CANARY_CRON="CANARYCRON$(openssl rand -hex 12)"
+CANARY_MONITOR="CANARYMON$(openssl rand -hex 12)"
+CANARY_TESTPAY="CANARYPAY$(openssl rand -hex 12)"
+CANARY_WEBHOOK="https://alerts.invalid/CANARYHOOK$(openssl rand -hex 12)"
+CANARY_DBPASS="CANARYDB$(openssl rand -hex 12)"
 ENC_KEY="${APP_ENCRYPTION_KEY:-MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=}"
 
 step "1. Types and unit/integration tests"
@@ -46,12 +52,18 @@ diff -q "$OUT/schema-a.sql" "$OUT/schema-b.sql" >/dev/null || fail "two fresh mi
 echo "fresh database: $(grep -c 'CREATE TABLE' "$OUT/schema-a.sql") tables, $(grep -c 'CREATE TRIGGER' "$OUT/schema-a.sql") triggers, $(grep -c 'CHECK (' "$OUT/schema-a.sql") checks; identical twice"
 
 step "3. Production build, then scan browser files for secrets"
-PAYSTACK_SECRET_KEY="$CANARY_PAYSTACK" S3_SECRET_ACCESS_KEY="$CANARY_S3" npm run build > "$OUT/build.txt" 2>&1 || { tail -30 "$OUT/build.txt"; fail "build"; }
+# Every secret setting gets a throwaway value for the build, so any that leaks into a browser file is caught.
+BUILD_ENC_KEY="$(openssl rand -base64 32)"
+BUILD_SECRETS=(PAYSTACK_SECRET_KEY="$CANARY_PAYSTACK" S3_SECRET_ACCESS_KEY="$CANARY_S3" S3_ACCESS_KEY_ID="$CANARY_S3_ID"
+  CRON_SECRET="$CANARY_CRON" MONITOR_TOKEN="$CANARY_MONITOR" TEST_PAYMENT_SECRET="$CANARY_TESTPAY"
+  ERROR_ALERT_WEBHOOK="$CANARY_WEBHOOK" APP_ENCRYPTION_KEY="$BUILD_ENC_KEY"
+  DATABASE_URL="postgresql://mlm:$CANARY_DBPASS@localhost:5432/mlm?schema=public")
+env "${BUILD_SECRETS[@]}" npm run build > "$OUT/build.txt" 2>&1 || { tail -30 "$OUT/build.txt"; fail "build"; }
 tail -3 "$OUT/build.txt"
-BROWSER_FILES=".next/static"
-PATTERNS="$CANARY_PAYSTACK|$CANARY_S3|sk_live_|sk_test_[A-Za-z0-9]{8,}|postgres(ql)?://|PRIVATE KEY|APP_ENCRYPTION_KEY|CRON_SECRET|TEST_PAYMENT_SECRET|S3_SECRET_ACCESS_KEY|PAYSTACK_SECRET_KEY|DATABASE_URL|costPriceMinor|passwordHash|mfaSecretEnc|accountNumberEnc"
-if grep -rEl "$PATTERNS" "$BROWSER_FILES" > "$OUT/secret-hits.txt"; then cat "$OUT/secret-hits.txt"; fail "secret or server-only field in browser files"; fi
-echo "scanned $(find "$BROWSER_FILES" -type f | wc -l) browser files: no secrets or server-only fields"
+node scripts/scan-client-bundles.mjs "$CANARY_PAYSTACK" "$CANARY_S3" "$CANARY_S3_ID" "$CANARY_CRON" "$CANARY_MONITOR" \
+  "$CANARY_TESTPAY" "$CANARY_WEBHOOK" "$CANARY_DBPASS" "$BUILD_ENC_KEY" > "$OUT/secret-hits.txt" 2>&1 \
+  || { cat "$OUT/secret-hits.txt"; fail "secret or server-only field in browser files"; }
+cat "$OUT/secret-hits.txt"
 
 step "4. Browser tests against the production build, with the server log captured"
 fresh mlm_e2e
