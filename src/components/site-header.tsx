@@ -1,11 +1,12 @@
 import Link from "next/link";
-import { Bell, CircleUser, LayoutDashboard, LogOut, Shield, ShoppingBag, ShoppingCart, User } from "lucide-react";
+import { Bell, CircleUser, LayoutDashboard, LogOut, Shield, ShoppingCart, User } from "lucide-react";
 import { getOps } from "@/lib/settings";
 import { getCurrentUser } from "@/lib/session";
 import { getBrand } from "@/lib/settings";
 import { prisma } from "@/lib/db";
 import { Button } from "@/components/ui/button";
 import { logoutAction } from "@/app/(auth)/actions";
+import { BrandLogo } from "@/components/brand-logo";
 import { MobileMenu } from "@/components/mobile-menu";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { cookies } from "next/headers";
@@ -23,15 +24,7 @@ export async function SiteHeader() {
     <header className="sticky top-0 z-40 border-b bg-background/90 backdrop-blur">
       <div className="container flex h-16 items-center gap-4">
         <Link href="/" className="flex items-center gap-2 font-semibold tracking-tight">
-          {brand.logoUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={brand.logoUrl} alt="" className="h-8 w-8 rounded" />
-          ) : (
-            <span className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-primary-foreground">
-              <ShoppingBag className="h-4 w-4" aria-hidden />
-            </span>
-          )}
-          <span>{brand.companyName}</span>
+          <BrandLogo name={brand.companyName} logoUrl={brand.logoUrl} />
         </Link>
         <nav className="ml-auto flex items-center gap-1" aria-label="Main">
           <ThemeToggle initial={theme} />

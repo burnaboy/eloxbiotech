@@ -60,6 +60,19 @@
 }
 
 @layer components {
+  /* Logo: dark-lettering copy in light mode, light-lettering copy in dark mode. */
+  .logo-dark { display: none; }
+  :root[data-theme="dark"] .logo-light { display: none; }
+  :root[data-theme="dark"] .logo-dark { display: block; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .logo-light { display: none; }
+    :root:not([data-theme="light"]) .logo-dark { display: block; }
+  }
+  /* Paper is white, so print the dark-lettering copy. */
+  @media print {
+    .logo-light { display: block !important; }
+    .logo-dark { display: none !important; }
+  }
   .prose-page { @apply max-w-3xl space-y-4 leading-relaxed; }
   .prose-page h1 { @apply text-3xl font-semibold tracking-tight; }
   .prose-page h2 { @apply pt-4 text-xl font-semibold tracking-tight; }

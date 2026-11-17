@@ -39,7 +39,7 @@ export default async function Settings({ searchParams }: { searchParams: Promise
           <form action={saveBrandAction} className="grid gap-4 sm:grid-cols-2">
             <F id="companyName" label="Company name"><Input id="companyName" name="companyName" defaultValue={b.companyName} required /></F>
             <F id="tagline" label="Tagline"><Input id="tagline" name="tagline" defaultValue={b.tagline} /></F>
-            <F id="logoUrl" label="Logo URL" hint="Square image, https only. Leave empty for the default icon."><Input id="logoUrl" name="logoUrl" defaultValue={b.logoUrl} /></F>
+            <F id="logoUrl" label="Logo URL" hint="Wide logo image, https only. Leave empty to use the built-in Elox logo (with a light version for dark mode)."><Input id="logoUrl" name="logoUrl" defaultValue={b.logoUrl} /></F>
             <div className="grid grid-cols-3 gap-3">
               <F id="primaryColor" label="Primary colour"><Input id="primaryColor" name="primaryColor" type="color" defaultValue={b.primaryColor} className="h-10 p-1" /></F>
               <F id="accentColor" label="Accent colour"><Input id="accentColor" name="accentColor" type="color" defaultValue={b.accentColor} className="h-10 p-1" /></F>
