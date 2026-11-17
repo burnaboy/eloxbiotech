@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/db";
 import { registerUser } from "@/lib/users";
-import { DEFAULT_COMP_PLAN, type CompPlan } from "@/lib/settings";
+import { DEFAULT_COMP_PLAN, clearSettingsCache, type CompPlan } from "@/lib/settings";
 import { publishPlan } from "@/lib/comp-plan";
 import { hashPassword } from "@/lib/auth";
 import { expect } from "vitest";
@@ -31,6 +31,7 @@ export async function resetDb() {
     "OrderItem", "Order", "CartItem", "InventoryMovement", "ProductImage", "ProductVariant", "Product", "AffiliateNode", "LoginAttempt", "Session", "User",
   ];
   await prisma.$executeRawUnsafe(`TRUNCATE ${tables.map((t) => `"${t}"`).join(", ")} CASCADE`);
+  clearSettingsCache();
 }
 
 /** Publishes a new plan version, the same way Admin > Settings does. */

@@ -21,6 +21,8 @@ Set these in the host's secret store, never in the repository. The app refuses u
 | --- | --- | --- |
 | `NODE_ENV` | yes | `production` |
 | `DATABASE_URL` | yes | App role with read/write on tables, **not** the owner. `?sslmode=require` |
+| `DB_POOL_SIZE` | no | Database connections per app instance (production 10). Without it Prisma uses 2 × CPUs + 1. See `docs/SCALING.md` |
+| `DB_POOL_TIMEOUT` | no | Seconds a request waits for a free connection before failing (default 10; production 20) |
 | `APP_URL` | yes | `https://your-domain` (turns on secure cookies and `upgrade-insecure-requests`) |
 | `APP_ENCRYPTION_KEY` | yes | 32 random bytes, base64 (`openssl rand -base64 32`). Encrypts bank numbers and two-step secrets. Keep an offline copy: without it they can't be read |
 | `CRON_SECRET` | yes | Long random string (`openssl rand -hex 32`) |

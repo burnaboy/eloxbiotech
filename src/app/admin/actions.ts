@@ -449,7 +449,7 @@ export async function contactHandledAction(id: string) {
 
 export async function saveBrandAction(fd: FormData) {
   await act(`/admin/settings`, { perm: "SETTINGS" }, async (adminId) => {
-    const before = await getBrand();
+    const before = await getBrand(prisma);
     const v = brandSchema.parse({
       companyName: str(fd, "companyName"), tagline: str(fd, "tagline"), logoUrl: str(fd, "logoUrl"), primaryColor: str(fd, "primaryColor"),
       accentColor: str(fd, "accentColor"), currency: str(fd, "currency"), supportEmail: str(fd, "supportEmail"), supportPhone: str(fd, "supportPhone"),
@@ -468,7 +468,7 @@ export async function saveBrandAction(fd: FormData) {
 /** Delivery and order settings. Tax and payout thresholds are kept as they are (see saveFinanceAction). */
 export async function saveShopAction(fd: FormData) {
   await act(`/admin/settings`, { perm: "SETTINGS" }, async (adminId) => {
-    const before = await getShopSettings();
+    const before = await getShopSettings(prisma);
     const v = shopSettingsSchema.parse({
       ...before,
       flatShippingMinor: toMinor(str(fd, "flatShipping")), freeShippingOverMinor: toMinor(str(fd, "freeShippingOver")),
@@ -484,7 +484,7 @@ export async function saveShopAction(fd: FormData) {
 /** Sensitive financial settings (VAT and the minimum withdrawal): super admin only, fresh authenticator code, and a reason. */
 export async function saveFinanceAction(fd: FormData) {
   await act(`/admin/settings`, { superOnly: true, stepUp: true, risk: { fd, action: "settings.finance", target: "shop" } }, async (adminId, reason) => {
-    const before = await getShopSettings();
+    const before = await getShopSettings(prisma);
     const v = shopSettingsSchema.parse({
       ...before,
       minPayoutMinor: toMinor(str(fd, "minPayout")),
